@@ -51,8 +51,10 @@ git push -u origin main
 * **文件重命名**: `ren <旧名> <新名>` **(Rename)** - 例: `ren data.m plot.m`
 * **移动去别处**: `mv <文件> <路径>` **(Move)** - 例: `mv main.m .\matlabplotcode\`
 * **永久删除掉**: `rm <名称>` **(Remove)** - 例: `rm useless.cpp` ⚠️ *直接删除不进回收站；删文件夹加 `-r`*
+| **断开仓库关联** | `rm -r .git` | **(Remove .git)** 让当前文件夹脱离 Git 监控 |
 
 ### 2. 目录导航穿梭
+* **分页看文档**: `more <文件名>` (More)
 * **查看当前内容**: `ls` **(List)**
 * **进入某文件夹**: `cd <文件夹名>` **(Change Directory)**
 * **退回上一层级**: `cd ..`
