@@ -9,4 +9,68 @@ git push -u origin main
 git remote add origin https://github.com/kenansun233-ui/cfd_dns.git
 git branch -M main
 git push -u origin main
-it a test word
+
+# CFD DNS 代码管理与同步指南
+
+本项目使用纯命令行（Windows PowerShell）进行文件管理与多设备 Git 同步。本设备仅用于代码编辑与版本控制，不进行编译。
+
+## 📁 目录结构
+* `dns_maincode/` : C++/CUDA 核心流体仿真代码源文件
+* `matlabplotcode/` : MATLAB 后处理与绘图脚本
+* `output_data/` : 仿真结果数据存放处（已配置 `.gitignore` 忽略，不上云）
+* `src/` : 附加源代码目录
+
+---
+
+## 🔄 Git 极速工作流 (日常必做)
+| 操作 | 终端命令 | 核心作用说明 |
+| :--- | :--- | :--- |
+| **1. 拉取** | `git pull` | **开工第一步**：将云端最新代码同步到本电脑 |
+| **2. 状态** | `git status` | 查看今天修改了哪些文件（红色未准备，绿色已准备） |
+| **3. 暂存** | `git add .` | 将所有变动打包入库（`.` 代表全部文件） |
+| **4. 提交** | `git commit -m "备注"` | 给本次修改贴标签并保存快照 |
+| **5. 推送** | `git push` | **收工最后一步**：将本地记录推送到 GitHub 云端备份 |
+
+---
+
+## 🌿 分支管理 (开辟实验区，测试新算法)
+* **查看所有分支**: `git branch` **(Branch)** - 看看现在有哪些实验区，带 `*` 的是当前所在位置。
+* **新建实验分支**: `git branch <名>` **(Branch)** - 例: `git branch test-scheme` (在不改动主线的情况下开个实验区)。
+* **切换分支**: `git switch <名>` **(Switch)** - 例: `git switch test-scheme` (跳进实验区，开始大刀阔斧改代码)。
+* **合并回主线**: `git merge <名>` **(Merge)** - **重要：** 实验成功后，先 `git switch main` 回主线，再执行 `git merge test-scheme` 把实验成功的代码合进来。
+* **删除分支**: `git branch -d <名>` **(Delete)** - 实验结束且已合并后，安全删掉该分支。
+
+---
+
+## 💻 终端纯命令行操作 (PowerShell)
+
+### 1. 文件与文件夹管理 (代替鼠标右键)
+* **新建文件夹**: `mkdir <名称>` **(Make Directory)** - 例: `mkdir test_case`
+* **新建空文件**: `ni <名称>` **(New Item)** - 例: `ni boundary.cpp`
+* **直接开文件**: `code <名称>` **(VS Code 启动命令)** - 例: `code .\dns_maincode\init.cuh`
+* **文件重命名**: `ren <旧名> <新名>` **(Rename)** - 例: `ren data.m plot.m`
+* **移动去别处**: `mv <文件> <路径>` **(Move)** - 例: `mv main.m .\matlabplotcode\`
+* **永久删除掉**: `rm <名称>` **(Remove)** - 例: `rm useless.cpp` ⚠️ *直接删除不进回收站；删文件夹加 `-r`*
+
+### 2. 目录导航穿梭
+* **查看当前内容**: `ls` **(List)**
+* **进入某文件夹**: `cd <文件夹名>` **(Change Directory)**
+* **退回上一层级**: `cd ..`
+* **清理终端屏幕**: `clear` **(Clear)**
+
+---
+
+## 💡 完整“实验区”操作模拟
+```powershell
+# 场景：你想测试一个新的边界条件，但怕改坏了主线代码：
+git pull                        # 1. 确保主线代码是最新的
+git branch test-boundary        # 2. 新建一个名为 test-boundary 的实验分支
+git switch test-boundary        # 3. 切换到该分支，现在的修改不会影响 main
+code .\src\boundary.cpp         # 4. 放心大胆地修改代码
+git add .                       # 5. 暂存实验改动
+git commit -m "实验：测试新型边界条件" # 6. 提交到实验分支
+# --- 如果实验成功，想合回主线 ---
+git switch main                 # 7. 回到主线 (Switch back to main)
+git merge test-boundary         # 8. 把成功的实验代码合并进来 (Merge)
+git push                        # 9. 推送主线到云端
+```
