@@ -167,7 +167,7 @@ constexpr double interpcoe4 = -1.0 / 16.0;
 
 constexpr double zero = 0.0;
 
-constexpr double dt = 0.01;
+constexpr double dt = 0.0002;
 
 #ifdef Restart
 constexpr int timemax = 20000;
