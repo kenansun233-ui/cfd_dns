@@ -342,7 +342,7 @@ __global__ void uhat_coe(process_variables* var, Ypara* ypara, int ns, double* a
 	}
 }
 
-void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk, double* d_vecm, double* d_arrmn)
+void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk)
 {
 	//cusparseHandle_t handle;
 	//CHECK_CUSPARSE(cusparseCreate(&handle));
@@ -369,7 +369,7 @@ void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, doubl
 		//uhat_update << <nyc, nxp >> > (flu, d, k);
 		//CHECK_CUDA(cudaFree(buffer));
 
-		InverseTridiagonalDevice(nxp, nyc, a, b, c, d, d_vecm, d_arrmn);
+		InverseTridiagonalDevice(nxp, nyc, a, b, c, d);
 		uhat_update << <nyc, nxp >> > (flu, d, k);
 
 
@@ -412,7 +412,7 @@ __global__ void vhat_coe(process_variables* var, Ypara* ypara, int ns, double* a
 	}
 }
 
-void vhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk, double* d_vecm, double* d_arrmn)
+void vhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk)
 {
 	//cusparseHandle_t handle;
 	//CHECK_CUSPARSE(cusparseCreate(&handle));
@@ -439,7 +439,7 @@ void vhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, doubl
 		//CHECK_CUDA(cudaFree(buffer));
 
 
-		InverseTridiagonalDevice(nxp, nyc, a, b, c, d, d_vecm, d_arrmn);
+		InverseTridiagonalDevice(nxp, nyc, a, b, c, d);
 		vhat_update << <nyc, nxp >> > (flu, d, k);
 
 
@@ -475,7 +475,7 @@ __global__ void what_coe(process_variables* var, Ypara* ypara, int ns, double* a
 	}
 }
 
-void what_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk, double* d_vecm, double* d_arrmn)
+void what_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk)
 {
 	//cusparseHandle_t handle;
 	//CHECK_CUSPARSE(cusparseCreate(&handle));
@@ -491,7 +491,7 @@ void what_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, doubl
 		//what_update << <nyc, nxp >> > (flu, d, k);
 		//CHECK_CUDA(cudaFree(buffer));
 
-		InverseTridiagonalDevice(nxp, nyc, a, b, c, d, d_vecm, d_arrmn);
+		InverseTridiagonalDevice(nxp, nyc, a, b, c, d);
 		what_update << <nyc, nxp >> > (flu, d, k);
 
 
@@ -747,7 +747,7 @@ __global__ void clcPPE(fluid* flu, process_variables* var, Ypara* ypara, double*
 
 }
 
-void clcPPE_1025(Ypara* ypara, double* ak1, double* ak3, cufftDoubleComplex* prsrc, double* a, double* b, double* c, double* d, double* e, cusparseHandle_t handle, double* d_vecm, double* d_arrmn)
+void clcPPE_1025(Ypara* ypara, double* ak1, double* ak3, cufftDoubleComplex* prsrc, double* a, double* b, double* c, double* d, double* e, cusparseHandle_t handle)
 {
 	for (int k = 0; k < nzp; k++)
 	{
@@ -765,8 +765,8 @@ void clcPPE_1025(Ypara* ypara, double* ak1, double* ak3, cufftDoubleComplex* prs
 		//CHECK_CUDA(cudaMalloc(&buffer2, bufferSize));
 		//CHECK_CUSPARSE(cusparseDgtsv2StridedBatch(handle, nyc, a, b, c, e, nxp, nyc, buffer2));
 		//CHECK_CUDA(cudaFree(buffer2));
-		InverseTridiagonalDevice(nxp, nyc, a, b, c, d, d_vecm, d_arrmn);
-		InverseTridiagonalDevice(nxp, nyc, a, b, c, e, d_vecm, d_arrmn);
+		InverseTridiagonalDevice(nxp, nyc, a, b, c, d);
+		InverseTridiagonalDevice(nxp, nyc, a, b, c, e);
 
 		clcPPE_update << <nyc, nxp >> > (prsrc, d, e, k);
 		cudaDeviceSynchronize();
@@ -1068,26 +1068,23 @@ __global__ void BackwardSubstitution(int m, int n, double* fj, double* arrmn) {
 }
 
 // ��������ֻ���� GPU ����������
-void InverseTridiagonalDevice(int m, int n, double* aj, double* bj, double* cj, double* fj, double* d_vecm, double* d_arrmn) {
+void InverseTridiagonalDevice(int m, int n, double* aj, double* bj, double* cj, double* fj) {
 
-	// double* d_vecm, * d_arrmn;
-	// cudaMalloc((void**)&d_vecm, m * sizeof(double));
-	// cudaMalloc((void**)&d_arrmn, m * n * sizeof(double));
+	double* d_vecm, * d_arrmn;
+	cudaMalloc((void**)&d_vecm, m * sizeof(double));
+	cudaMalloc((void**)&d_arrmn, m * n * sizeof(double));
 
 	int threadsPerBlock = 1024;
 	int blocksPerGrid = (m + threadsPerBlock - 1) / threadsPerBlock;
 
-
 	ForwardElimination << <blocksPerGrid, threadsPerBlock >> > (m, n, aj, bj, cj, fj, d_vecm, d_arrmn);
-	CHECK_CUDA(cudaDeviceSynchronize());
-	// cudaDeviceSynchronize();
+	cudaDeviceSynchronize();
 
 	BackwardSubstitution << <blocksPerGrid, threadsPerBlock >> > (m, n, fj, d_arrmn);
-	CHECK_CUDA(cudaDeviceSynchronize());
-	// cudaDeviceSynchronize();
+	cudaDeviceSynchronize();
 	
-	// cudaFree(d_vecm);
-	// cudaFree(d_arrmn);
+	cudaFree(d_vecm);
+	cudaFree(d_arrmn);
 }
 
 __global__ void average_xz(fluid* flu, dyDir* dydir, Stat* stat, int nx, int ny, int nz) {
@@ -1210,10 +1207,6 @@ void calcuate()
 
 	double* s3tot;
 
-    double *d_vecm_global, *d_arrmn_global;
-	CHECK_CUDA(cudaMalloc((void**)&d_vecm_global, static_cast<size_t>(nxp) * sizeof(double)));
-	CHECK_CUDA(cudaMalloc((void**)&d_arrmn_global, static_cast<size_t>(nxp) * static_cast<size_t>(nyc) * sizeof(double)));
-
 	double* aa, * bb, * cc, * dd;
 
 	double* pp; //for the image of prsrc
@@ -1300,9 +1293,9 @@ void calcuate()
 			//	CHECK_CUDA(cudaFree(buffer));
 			//}
 
-			uhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device, d_vecm_global, d_arrmn_global);
-			what_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device, d_vecm_global, d_arrmn_global);
-			vhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device, d_vecm_global, d_arrmn_global);
+			uhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device);
+			what_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device);
+			vhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device);
 
 			bc_velocity << < nzp, nxp >> > (flu);
 
@@ -1321,7 +1314,7 @@ void calcuate()
 
 			CHECK_CUFFT(cufftExecZ2Z(plan, (cufftDoubleComplex*)prsrc, (cufftDoubleComplex*)prsrc, CUFFT_FORWARD)); cudaDeviceSynchronize();
 
-			clcPPE_1025(ypara_device, ak1, ak3, prsrc, aa, bb, cc, dd, pp, handle, d_vecm_global, d_arrmn_global);
+			clcPPE_1025(ypara_device, ak1, ak3, prsrc, aa, bb, cc, dd, pp, handle);
 
 			//clcPPE << < nzp, nxp >> > (flu, var, ypara_device, ak1, ak3, prsrc); cudaDeviceSynchronize();
 
@@ -1405,8 +1398,6 @@ void calcuate()
 	cudaFree(cc);
 	cudaFree(dd);
 	cudaFree(pp);
-	cudaFree(d_vecm_global);
-	cudaFree(d_arrmn_global);
 }
 
 
