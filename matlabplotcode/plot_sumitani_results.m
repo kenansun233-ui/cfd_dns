@@ -1,7 +1,7 @@
 function plot_sumitani_results
     clc; close all;
     % --- 路径 ---
-    dns_dir = 'E:\sce_workfile\cfd_matlab_code\Re_150_UB_ag40000';   
+    dns_dir = 'E:\sce_workfile\cfd_matlab_code\Re_150_UB_ag60000_newbc';   
     fname_stat   = 'stat.dat';
     fname_prgrad = 'prgrad.dat';
     fname_mesh   = 'mesh.dat';
@@ -76,11 +76,14 @@ function plot_sumitani_results
     % u_top2 = um(nyc-1);
     % u_top3 = um(nyc-2);
     % 
-    % denominator = (y1 - y2) * (y1 - y3);
-    % grad_top = ((2*y1 - y2 - y3)*u_top1 + (y1 - y3)*u_top2 + (y1 - y2)*u_top3) /denominator;
+    % %4点法（三阶插值）
+    % % denominator = (y1 - y2) * (y1 - y3);
+    % % grad_top = ((2*y1 - y2 - y3)*u_top1 + (y1 - y3)*u_top2 + (y1 - y2)*u_top3) /denominator;
+
+    % grad_top = (y2^2 *u_top1 - y1^2 * u_top2 ) / (y1 * y2 * (y2 - y1));
     % tau_w_top = nu * abs(grad_top);
     % Utau_top = sqrt(abs(tau_w_top));
-  
+    % 
 
 %%
 
@@ -149,8 +152,10 @@ Utau_top = sqrt(abs(tau_w_top));
 
 
 %%
-    fprintf('Injection (Bot) Utau (3-Point) = %.6f\n', Utau_bot);
-    fprintf('Suction   (Top) Utau (3-Point) = %.6f\n', Utau_top);
+    % fprintf('Injection (Bot) Utau (3-Point) = %.6f\n', Utau_bot);
+    % fprintf('Suction   (Top) Utau (3-Point) = %.6f\n', Utau_top);
+    fprintf('Injection (Bot) Utau (5-Point) = %.6f\n', Utau_bot);
+    fprintf('Suction   (Top) Utau (5-Point) = %.6f\n', Utau_top);
     % --- 循环计算 turbh (分离上下壁面) ---
     % 使用 floor(nyp/2) 确保覆盖半宽
     limit_loop = floor(nyc/2);
