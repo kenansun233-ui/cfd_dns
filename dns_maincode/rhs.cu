@@ -67,11 +67,11 @@ __global__ void Update_VelInterp_uvw(fluid* flu, double* uxhx, double* uyhx, dou
 
 	}
 
-	if (jc == nyp)
-	{
-		uyhx[d_Ord3(ic, jc, kc, nzp, nxp)] = 0.0;
-		uyhz[d_Ord3(ic, jc, kc, nzp, nxp)] = 0.0;
-	}
+	// if (jc == nyp)
+	// {
+	// 	uyhx[d_Ord3(ic, jc, kc, nzp, nxp)] = 0.0;
+	// 	uyhz[d_Ord3(ic, jc, kc, nzp, nxp)] = 0.0;
+	// }
 
 }
 
