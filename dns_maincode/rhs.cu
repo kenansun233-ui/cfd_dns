@@ -1359,6 +1359,11 @@ void calcuate()
 			//output_velocity(flu, flu_host, t);
 			clcstat(flu);
 		}
+		if (t != 0 && t % 5000 == 0 && t <= timemax)
+		{
+			//output_velocity(flu, flu_host, t);
+			output_restart(flu, flu_host, var);
+		}
 #else
 		if (t % 1 == 0)
 		{
@@ -1373,9 +1378,10 @@ void calcuate()
 		{
 			clcstat(flu);
 		}
-		if (t == timemax)
+		if (t != 0 && t % 5000 == 0 && t <= timemax)
 		{
-			output_velocity(flu, flu_host, t);
+			//output_velocity(flu, flu_host, t);
+			output_restart(flu, flu_host, var);
 		}
 #endif
 	}
