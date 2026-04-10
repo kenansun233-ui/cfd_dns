@@ -1,39 +1,44 @@
 function plot_sumitani_results
     clc; close all;
-    % --- è·¯å¾„ ---
-    dns_dir = 'E:\sce_workfile\cfd_matlab_code\Re_150_UB_ag60000_newbc';   
+    % --- Â·¾¶ ---
+    dns_dir = 'H:\dns_2026\work\work\cfd_matlab_code\Re_150_UB_ag60000_newbc';   
     fname_stat   = 'stat.dat';
     fname_prgrad = 'prgrad.dat';
     fname_mesh   = 'mesh.dat';
-   
-    % --- ç‰©ç†å‚æ•° ---
+    % plot(prgrad, 'r-', 'LineWidth', 1.5);
+    % --- ÎïÀí²ÎÊı ---
     nu = 4.5903E-4;  
     
-    % --- ç½‘æ ¼å‚æ•° (ä¿ç•™åŸä»£ç è®¾ç½®) ---
+    ref_mean_path = 'H:\dns_2026\work\work\cfd_matlab_code\1.txt';     % Æ½¾ùËÙ¶ÈÎÄÏ×Êı¾İ
+    ref_u_path    = 'H:\dns_2026\work\work\cfd_matlab_code\u+.txt';    % u_rms ÎÄÏ×Êı¾İ
+    ref_v_path    = 'H:\dns_2026\work\work\cfd_matlab_code\v+.txt';    % v_rms ÎÄÏ×Êı¾İ
+    ref_w_path    = 'H:\dns_2026\work\work\cfd_matlab_code\w+.txt';    % w_rms ÎÄÏ×Êı¾İ
+    
+    % --- Íø¸ñ²ÎÊı (±£ÁôÔ­´úÂëÉèÖÃ) ---
     x_length = 128/2;      
     y_length = 191+1;
     % y_length = 127+1;      
     z_length = 128/2;    
     xyz = importdata(fullfile(dns_dir, fname_mesh));
     if length(xyz) ~= (x_length + y_length + z_length)
-         error('mesh.dat é•¿åº¦ä¸åŒ¹é…ï¼Œè¯·æ£€æŸ¥ x/y/z_length è®¾ç½®');
+         error('mesh.dat ³¤¶È²»Æ¥Åä£¬Çë¼ì²é x/y/z_length ÉèÖÃ');
     end
     x = xyz(1 : x_length);
     z = xyz(x_length+y_length+1 : x_length + y_length + z_length);
     y = xyz(x_length+1 : x_length+y_length);
     yc = y(2:end-1);
     nyc = length(yc);
-    % --- 2.3 è¯»å–ç»Ÿè®¡æ•°æ® (stat.dat) ---
+    % --- 2.3 ¶ÁÈ¡Í³¼ÆÊı¾İ (stat.dat) ---
     stat = importdata(fullfile(dns_dir, fname_stat));
     data_num = 11; 
     num_steps = floor(size(stat, 1) / data_num);
     
-    if num_steps < 1, error('stat.dat æ•°æ®ä¸è¶³'); end
+    if num_steps < 1, error('stat.dat Êı¾İ²»×ã'); end
 
     stat_sum = zeros(data_num, nyc); 
 
     if size(stat, 2) ~= nyc
-        warning('stat.dat åˆ—æ•° (%d) ä¸ nyp (%d) ä¸ä¸€è‡´ï¼Œåç»­ç´¢å¼•å¯èƒ½å‡ºé”™', size(stat, 2), nyc);
+        warning('stat.dat ÁĞÊı (%d) Óë nyp (%d) ²»Ò»ÖÂ£¬ºóĞøË÷Òı¿ÉÄÜ³ö´í', size(stat, 2), nyc);
     end
 
     
@@ -42,27 +47,27 @@ function plot_sumitani_results
         stat_sum = stat_sum + stat(base_idx+1:base_idx+data_num, :);
     end
     stat_avg = stat_sum / num_steps;
-    % æå–å˜é‡
+    % ÌáÈ¡±äÁ¿
     ox = stat_avg(1, :); oy = stat_avg(2, :); oz = stat_avg(3, :);
     um = stat_avg(4, :); vm = stat_avg(5, :); wm = stat_avg(6, :); pm = stat_avg(7, :);
     um2= stat_avg(8, :); vm2= stat_avg(9, :); wm2= stat_avg(10,:); pm2= stat_avg(11,:);
-    % --- æ¢¯åº¦è®¡ç®— ---
+    % --- Ìİ¶È¼ÆËã ---
     dudyp = gradient(um, yc);
     dwdyp = gradient(wm, yc);
 
     prgrad = importdata(fullfile(dns_dir, fname_prgrad));
-    rear_ratio = 0.3;             % å–å30%æ•°æ®ï¼Œp=0.3ï¼ˆå¯ä¿®æ”¹ä¸º0.2ã€0.8ç­‰ï¼Œ0<rear_ratioâ‰¤1ï¼‰
+    rear_ratio = 0.3;             % È¡ºó30%Êı¾İ£¬p=0.3£¨¿ÉĞŞ¸ÄÎª0.2¡¢0.8µÈ£¬0<rear_ratio¡Ü1£©
     Utau = sqrt(abs(mean(prgrad(floor(length(prgrad)*(1-rear_ratio))+1 : end))));
     vormag = Utau*Utau/nu;
     fprintf('Utau = %.6f, vormag = %.6f\n', Utau, vormag);
     
-    % åˆ†åˆ«è®¡ç®—ä¸‹å£é¢(Bot)å’Œä¸Šå£é¢(Top)çš„å±€éƒ¨æ‘©æ“¦é€Ÿåº¦
+    % ·Ö±ğ¼ÆËãÏÂ±ÚÃæ(Bot)ºÍÉÏ±ÚÃæ(Top)µÄ¾Ö²¿Ä¦²ÁËÙ¶È
     % Injection Side (Bottom, Index 1)
-    % ç²¾åº¦æ”¹è¿›ï¼šä½¿ç”¨ä¸‰ç‚¹æ³• (Three-point scheme) è®¡ç®—å£é¢æ¢¯åº¦
-    % å…¬å¼ï¼šdu/dy = (y2^2 * u1 - y1^2 * u2) / (y1 * y2 * (y2 - y1))
+    % ¾«¶È¸Ä½ø£ºÊ¹ÓÃÈıµã·¨ (Three-point scheme) ¼ÆËã±ÚÃæÌİ¶È
+    % ¹«Ê½£ºdu/dy = (y2^2 * u1 - y1^2 * u2) / (y1 * y2 * (y2 - y1))
     
-    % % --- ä¸‹å£é¢ (Bottom/Injection) ---
-    % % ä½¿ç”¨ yp(1), yp(2) å’Œå£é¢(0)
+    % % --- ÏÂ±ÚÃæ (Bottom/Injection) ---
+    % % Ê¹ÓÃ yp(1), yp(2) ºÍ±ÚÃæ(0)
     % y1 = yc(1);  u1 = um(1);
     % y2 = yc(2);  u2 = um(2);
     % y3 = yc(3); 
@@ -70,13 +75,13 @@ function plot_sumitani_results
     % tau_w_bot = nu * grad_bot;
     % Utau_bot = sqrt(abs(tau_w_bot));
     % 
-    % % --- ä¸Šå£é¢ (Top/Suction) ---
-    % % ä½¿ç”¨ yp(nyc), yp(nyc-1) å’Œå£é¢(2.0)
+    % % --- ÉÏ±ÚÃæ (Top/Suction) ---
+    % % Ê¹ÓÃ yp(nyc), yp(nyc-1) ºÍ±ÚÃæ(2.0)
     % u_top1 = um(nyc);
     % u_top2 = um(nyc-1);
     % u_top3 = um(nyc-2);
     % 
-    % %4ç‚¹æ³•ï¼ˆä¸‰é˜¶æ’å€¼ï¼‰
+    % %4µã·¨£¨Èı½×²åÖµ£©
     % % denominator = (y1 - y2) * (y1 - y3);
     % % grad_top = ((2*y1 - y2 - y3)*u_top1 + (y1 - y3)*u_top2 + (y1 - y2)*u_top3) /denominator;
 
@@ -87,67 +92,35 @@ function plot_sumitani_results
 
 %%
 
-y_bot = [yc(1), yc(2), yc(3), yc(4)];  % ä¸‹å£é¢æ’å€¼èŠ‚ç‚¹
-u_bot = [um(1), um(2), um(3), um(4)];  % å¯¹åº”é€Ÿåº¦å€¼
+% --- ÏÂ±ÚÃæ (Bottom/Injection) ---
+y1 = yc(1); y2 = yc(2); y3 = yc(3);
+u1 = um(1); u2 = um(2); u3 = um(3);
 
-% 2. æ£€æŸ¥ä¸‹å£é¢èŠ‚ç‚¹æ˜¯å¦é‡å¤ï¼ˆé¿å…åˆ†æ¯ä¸º0ï¼‰
-if length(unique(y_bot)) < 4
-    error('ä¸‹å£é¢æ’å€¼èŠ‚ç‚¹yc(1-4)å­˜åœ¨é‡å¤ï¼Œæ— æ³•è¿›è¡Œä¸‰é˜¶æ‹‰æ ¼æœ—æ—¥æ’å€¼');
-end
+% ¡¾ÕıÈ·Èı½×¡¿°üº¬±ÚÃæ(0,0)¼°Ç°3²ãÍø¸ñ£¬ÑÏ¸ñÔÚ y=0 ´¦Çóµ¼
+term1_bot = u1 * (y2 * y3) / (y1 * (y1 - y2) * (y1 - y3));
+term2_bot = u2 * (y1 * y3) / (y2 * (y2 - y1) * (y2 - y3));
+term3_bot = u3 * (y1 * y2) / (y3 * (y3 - y1) * (y3 - y2));
+grad_bot_3rd = term1_bot + term2_bot + term3_bot;
 
-% 3. æ‹‰æ ¼æœ—æ—¥åŸºå‡½æ•°åœ¨y_bot(1)ï¼ˆç¬¬ä¸€ä¸ªç‚¹ï¼‰å¤„çš„å¯¼æ•°è®¡ç®—
-y1_bot = y_bot(1);  % ä¸‹å£é¢ç›®æ ‡ç‚¹ï¼ˆyc(1)ï¼‰
-% åŸºå‡½æ•°L1(y)åœ¨y1_botå¤„çš„å¯¼æ•°
-dL1_bot = ((y1_bot-y_bot(2))*(y1_bot-y_bot(3)) + (y1_bot-y_bot(2))*(y1_bot-y_bot(4)) + (y1_bot-y_bot(3))*(y1_bot-y_bot(4))) / ...
-    ((y1_bot-y_bot(2))*(y1_bot-y_bot(3))*(y1_bot-y_bot(4)));
-% åŸºå‡½æ•°L2(y)åœ¨y1_botå¤„çš„å¯¼æ•°
-dL2_bot = ((y1_bot-y_bot(1))*(y1_bot-y_bot(3)) + (y1_bot-y_bot(1))*(y1_bot-y_bot(4)) + (y1_bot-y_bot(3))*(y1_bot-y_bot(4))) / ...
-    ((y_bot(2)-y_bot(1))*(y_bot(2)-y_bot(3))*(y_bot(2)-y_bot(4)));
-% åŸºå‡½æ•°L3(y)åœ¨y1_botå¤„çš„å¯¼æ•°
-dL3_bot = ((y1_bot-y_bot(1))*(y1_bot-y_bot(2)) + (y1_bot-y_bot(1))*(y1_bot-y_bot(4)) + (y1_bot-y_bot(2))*(y1_bot-y_bot(4))) / ...
-    ((y_bot(3)-y_bot(1))*(y_bot(3)-y_bot(2))*(y_bot(3)-y_bot(4)));
-% åŸºå‡½æ•°L4(y)åœ¨y1_botå¤„çš„å¯¼æ•°
-dL4_bot = ((y1_bot-y_bot(1))*(y1_bot-y_bot(2)) + (y1_bot-y_bot(1))*(y1_bot-y_bot(3)) + (y1_bot-y_bot(2))*(y1_bot-y_bot(3))) / ...
-    ((y_bot(4)-y_bot(1))*(y_bot(4)-y_bot(2))*(y_bot(4)-y_bot(3)));
+% --- ÉÏ±ÚÃæ (Top/Suction) ---
+% ¼ÆËãµ½ÉÏ±ÚÃæ (y=2.0) µÄ¾ø¶ÔÎïÀí¾àÀë
+h1 = 2.0 - yc(nyc);   u_t1 = um(nyc);
+h2 = 2.0 - yc(nyc-1); u_t2 = um(nyc-1);
+h3 = 2.0 - yc(nyc-2); u_t3 = um(nyc-2);
 
-% 4. åˆå¹¶å¯¼æ•°å¾—åˆ°ä¸‹å£é¢æ¢¯åº¦
-grad_bot = u_bot(1)*dL1_bot + u_bot(2)*dL2_bot + u_bot(3)*dL3_bot + u_bot(4)*dL4_bot;
+% ¡¾ÕıÈ·Èı½×¡¿°üº¬ÉÏ±ÚÃæ(0,0)¼°µ¹Êı3²ãÍø¸ñ£¬ÑÏ¸ñÔÚ¾àÀë±ÚÃæ 0 ´¦Çóµ¼
+term1_top = u_t1 * (h2 * h3) / (h1 * (h1 - h2) * (h1 - h3));
+term2_top = u_t2 * (h1 * h3) / (h2 * (h2 - h1) * (h2 - h3));
+term3_top = u_t3 * (h1 * h2) / (h3 * (h3 - h1) * (h3 - h2));
+grad_top_3rd = term1_top + term2_top + term3_top;
 
-% ===================== ä¸Šå£é¢ (Top) ä¸‰é˜¶æ‹‰æ ¼æœ—æ—¥æ’å€¼ =====================
-% 1. å–å4ä¸ªç‚¹ä½œä¸ºä¸Šå£é¢æ’å€¼çš„å››ç‚¹ï¼ˆè®¡ç®—yc(nyc)å¤„çš„å¯¼æ•°ï¼‰
-y_top = [yc(nyc-3), yc(nyc-2), yc(nyc-1), yc(nyc)];  % ä¸Šå£é¢æ’å€¼èŠ‚ç‚¹
-u_top = [um(nyc-3), um(nyc-2), um(nyc-1), um(nyc)];  % å¯¹åº”é€Ÿåº¦å€¼
-
-% 2. æ£€æŸ¥ä¸Šå£é¢èŠ‚ç‚¹æ˜¯å¦é‡å¤ï¼ˆé¿å…åˆ†æ¯ä¸º0ï¼‰
-if length(unique(y_top)) < 4
-    error('ä¸Šå£é¢æ’å€¼èŠ‚ç‚¹yc(%d:%d)å­˜åœ¨é‡å¤ï¼Œæ— æ³•è¿›è¡Œä¸‰é˜¶æ‹‰æ ¼æœ—æ—¥æ’å€¼', nyc-3, nyc);
-end
-
-% 3. æ‹‰æ ¼æœ—æ—¥åŸºå‡½æ•°åœ¨y_top(4)ï¼ˆæœ€åä¸€ä¸ªç‚¹ï¼‰å¤„çš„å¯¼æ•°è®¡ç®—
-y4_top = y_top(4);  % ä¸Šå£é¢ç›®æ ‡ç‚¹ï¼ˆyc(nyc)ï¼‰
-% åŸºå‡½æ•°L1(y)åœ¨y4_topå¤„çš„å¯¼æ•°
-dL1_top = ((y4_top-y_top(2))*(y4_top-y_top(3)) + (y4_top-y_top(2))*(y4_top-y_top(4)) + (y4_top-y_top(3))*(y4_top-y_top(4))) / ...
-    ((y_top(1)-y_top(2))*(y_top(1)-y_top(3))*(y_top(1)-y_top(4)));
-% åŸºå‡½æ•°L2(y)åœ¨y4_topå¤„çš„å¯¼æ•°
-dL2_top = ((y4_top-y_top(1))*(y4_top-y_top(3)) + (y4_top-y_top(1))*(y4_top-y_top(4)) + (y4_top-y_top(3))*(y4_top-y_top(4))) / ...
-    ((y_top(2)-y_top(1))*(y_top(2)-y_top(3))*(y_top(2)-y_top(4)));
-% åŸºå‡½æ•°L3(y)åœ¨y4_topå¤„çš„å¯¼æ•°
-dL3_top = ((y4_top-y_top(1))*(y4_top-y_top(2)) + (y4_top-y_top(1))*(y4_top-y_top(4)) + (y4_top-y_top(2))*(y4_top-y_top(4))) / ...
-    ((y_top(3)-y_top(1))*(y_top(3)-y_top(2))*(y_top(3)-y_top(4)));
-% åŸºå‡½æ•°L4(y)åœ¨y4_topå¤„çš„å¯¼æ•°
-dL4_top = ((y4_top-y_top(1))*(y4_top-y_top(2)) + (y4_top-y_top(1))*(y4_top-y_top(3)) + (y4_top-y_top(2))*(y4_top-y_top(3))) / ...
-    ((y_top(4)-y_top(1))*(y_top(4)-y_top(2))*(y_top(4)-y_top(3)));
-
-% 4. åˆå¹¶å¯¼æ•°å¾—åˆ°ä¸Šå£é¢æ¢¯åº¦
-grad_top = u_top(1)*dL1_top + u_top(2)*dL2_top + u_top(3)*dL3_top + u_top(4)*dL4_top;
-
-% ===================== åŸæœ‰é€»è¾‘ï¼šè®¡ç®—å‰ªåˆ‡åº”åŠ›å’Œæ‘©æ“¦é€Ÿåº¦ =====================
-% ä¸‹å£é¢
-tau_w_bot = nu * grad_bot;
+% =========================================================================
+% ¼ÆËã×îÖÕµÄ¼ôÇĞÓ¦Á¦ºÍÄ¦²ÁËÙ¶È
+% =========================================================================
+tau_w_bot = nu * grad_bot_3rd; 
 Utau_bot = sqrt(abs(tau_w_bot));
 
-% ä¸Šå£é¢ï¼ˆä¿æŒåŸé€»è¾‘çš„absï¼Œè‹¥éœ€è¦ç‰©ç†æ„ä¹‰çš„ç¬¦å·å¯æ ¹æ®å®é™…åœºæ™¯è°ƒæ•´ï¼‰
-tau_w_top = nu * abs(grad_top);
+tau_w_top = nu * abs(grad_top_3rd);
 Utau_top = sqrt(abs(tau_w_top));
 
 
@@ -156,58 +129,57 @@ Utau_top = sqrt(abs(tau_w_top));
     % fprintf('Suction   (Top) Utau (3-Point) = %.6f\n', Utau_top);
     fprintf('Injection (Bot) Utau (5-Point) = %.6f\n', Utau_bot);
     fprintf('Suction   (Top) Utau (5-Point) = %.6f\n', Utau_top);
-    % --- å¾ªç¯è®¡ç®— turbh (åˆ†ç¦»ä¸Šä¸‹å£é¢) ---
-    % ä½¿ç”¨ floor(nyp/2) ç¡®ä¿è¦†ç›–åŠå®½
+    % --- Ñ­»·¼ÆËã turbh (·ÖÀëÉÏÏÂ±ÚÃæ) ---
+    % Ê¹ÓÃ floor(nyp/2) È·±£¸²¸Ç°ë¿í
     limit_loop = floor(nyc/2);
     
     turbh_bot = zeros(limit_loop, 11);
     turbh_top = zeros(limit_loop, 11);
-    % å…³é”®ä¿®æ”¹ï¼šå»ºç«‹ä¸“é—¨çš„ Y+ åæ ‡æ•°ç»„
+    % ¹Ø¼üĞŞ¸Ä£º½¨Á¢×¨ÃÅµÄ Y+ ×ø±êÊı×é
     yh_bot = zeros(limit_loop, 1);
     yh_top = zeros(limit_loop, 1);
 
     for i = 1:limit_loop
-        % --- ç´¢å¼•å®šä¹‰ (ä¿®æ­£ä¸ºä¸¥æ ¼å¯¹ç§°) ---
-        idx_bot = i;              % ä¸‹å£é¢: ç¬¬ i ä¸ªç½‘æ ¼
-        idx_top = nyc - i + 1;    % ä¸Šå£é¢: å€’æ•°ç¬¬ i ä¸ªç½‘æ ¼
+        % --- Ë÷Òı¶¨Òå (ĞŞÕıÎªÑÏ¸ñ¶Ô³Æ) ---
+        idx_bot = i;              % ÏÂ±ÚÃæ: µÚ i ¸öÍø¸ñ
+        idx_top = nyc - i + 1;    % ÉÏ±ÚÃæ: µ¹ÊıµÚ i ¸öÍø¸ñ
         
-        % --- è®¡ç®— Y+ åæ ‡ ---
-        % ä¸‹å£é¢ (Injection): ä½¿ç”¨æ’å€¼åçš„ä¸­å¿ƒåæ ‡ yc
+        % --- ¼ÆËã Y+ ×ø±ê ---
+        % ÏÂ±ÚÃæ (Injection): Ê¹ÓÃ²åÖµºóµÄÖĞĞÄ×ø±ê yc
         dist_bot_val = yc(idx_bot);
         yh_bot(i) = dist_bot_val * Utau_bot / nu;
         
-        % ä¸Šå£é¢ (Suction): è·ç¦» = 2.0 - yc
+        % ÉÏ±ÚÃæ (Suction): ¾àÀë = 2.0 - yc
         dist_top_val = 2.0 - yc(idx_top);
         yh_top(i) = dist_top_val * Utau_top / nu;
         
-        % --- ä¸‹å£é¢ (Injection) æ•°æ®å¡«å…… ---
+        % --- ÏÂ±ÚÃæ (Injection) Êı¾İÌî³ä ---
         turbh_bot(i,1) = um(idx_bot) / Utau_bot;             % U+
         turbh_bot(i,5) = sqrt(um2(idx_bot) - um(idx_bot)^2) / Utau_bot; % u_rms+
         turbh_bot(i,6) = sqrt( vm2(idx_bot) - vm(idx_bot)^2) / Utau_bot; % v_rms+
         turbh_bot(i,7) = sqrt( wm2(idx_bot) - wm(idx_bot)^2) / Utau_bot; % w_rms+
         
-        % --- ä¸Šå£é¢ (Suction) æ•°æ®å¡«å…… ---
+        % --- ÉÏ±ÚÃæ (Suction) Êı¾İÌî³ä ---
         turbh_top(i,1) = um(idx_top) / Utau_top;             % U+
         turbh_top(i,5) = sqrt( um2(idx_top) - um(idx_top)^2) / Utau_top; % u_rms+
         turbh_top(i,6) = sqrt( vm2(idx_top) - vm(idx_top)^2) / Utau_top; % v_rms+
         turbh_top(i,7) = sqrt( wm2(idx_top) - wm(idx_top)^2) / Utau_top; % w_rms+
     end
     % =========================================================================
-    % è¯»å–æ–‡çŒ®æ•°æ®
+    % ¶ÁÈ¡ÎÄÏ×Êı¾İ
     % =========================================================================
-    % å‡è®¾æ–‡ä»¶åœ¨å½“å‰è·¯å¾„ï¼Œå¦‚æœä¸å­˜åœ¨åˆ™èµ‹ç©º
-    if exist('1.txt', 'file'), ref_mean = importdata('1.txt'); else, ref_mean = []; end
-    if exist('u+.txt', 'file'), ref_u = importdata('u+.txt'); else, ref_u = []; end
-    if exist('v+.txt', 'file'), ref_v = importdata('v+.txt'); else, ref_v = []; end
-    if exist('w+.txt', 'file'), ref_w = importdata('w+.txt'); else, ref_w = []; end
-
-    fprintf('\n--- ä¸‹å£é¢ (Injection) å‰ 10 å±‚ y+ ---\n');
+    if exist(ref_mean_path, 'file'), ref_mean = importdata(ref_mean_path); else, ref_mean = []; end
+    if exist(ref_u_path, 'file'),    ref_u    = importdata(ref_u_path);    else, ref_u    = []; end
+    if exist(ref_v_path, 'file'),    ref_v    = importdata(ref_v_path);    else, ref_v    = []; end
+    if exist(ref_w_path, 'file'),    ref_w    = importdata(ref_w_path);    else, ref_w    = []; end
+    
+    fprintf('\n--- ÏÂ±ÚÃæ (Injection) Ç° 10 ²ã y+ ---\n');
     for i = 1:10
-    fprintf('ç¬¬%2då±‚: y+ = %.4f\n', i, yh_bot(i));
+    fprintf('µÚ%2d²ã: y+ = %.4f\n', i, yh_bot(i));
     end
     fprintf('------------------------------------\n');
     % =========================================================================
-    % 4. ç»˜å›¾
+    % 4. »æÍ¼
     % =========================================================================
     draw_plots_bottom(yh_bot, turbh_bot, yh_top, turbh_top, ref_mean, ref_u, ref_v, ref_w);
 end
@@ -216,28 +188,28 @@ function draw_plots_bottom(yh_bot, turbh_bot, yh_top, turbh_top, ref_mean, ref_u
     style_bot = {'r-', 'LineWidth', 1.5};
     
     figure('Units', 'pixels', 'Position', [100, 100, 1000, 500], 'Color', 'w', 'Name', 'Bot and Top');
-    % Fig 3: Mean Velocity (å·¦å›¾)
+    % Fig 3: Mean Velocity (×óÍ¼)
     subplot(1, 2, 1); hold on; box on;
     p1 = plot(yh_bot, turbh_bot(:,1), 'r-', 'LineWidth', 1.5);
     p3 = plot(yh_top, turbh_top(:,1), 'b-', 'LineWidth', 1.5);
     
-    % --- ç»˜åˆ¶æ–‡çŒ®å¹³å‡é€Ÿåº¦ (ç»¿è‰²) ---
+    % --- »æÖÆÎÄÏ×Æ½¾ùËÙ¶È (ÂÌÉ«) ---
     if ~isempty(ref_mean)
         p_ref = plot(ref_mean(:,1), ref_mean(:,2), 'g-', 'LineWidth', 1.5);
     end
     
-    % å¯¹æ•°å¾‹å‚è€ƒçº¿
+    % ¶ÔÊıÂÉ²Î¿¼Ïß
     xref = linspace(1, 200, 100);
     p2 = semilogx(xref, 2.5*log(xref)+5.5, 'k--', 'LineWidth', 1.2);
     set(gca, 'XScale', 'log');
-    % ç»˜åˆ¶ç²˜æ€§åº•å±‚ u+ = y+ 
+    % »æÖÆğ¤ĞÔµ×²ã u+ = y+ 
     xref_vis = linspace(0.1, 10, 20);
     semilogx(xref_vis, xref_vis, 'k--', 'LineWidth', 1.2);
     xlabel('$y^+$', 'Interpreter', 'latex');
     ylabel('$\overline{u}^+$', 'Interpreter', 'latex');
     title('Fig 3: Mean Velocity (Injection)');
     
-    % æ›´æ–°å›¾ä¾‹
+    % ¸üĞÂÍ¼Àı
     if ~isempty(ref_mean)
         legend([p1, p3, p_ref, p2], {'Bot', 'Top', 'Ref', 'Log Law'}, 'Location', 'best');
     else
@@ -248,13 +220,13 @@ function draw_plots_bottom(yh_bot, turbh_bot, yh_top, turbh_top, ref_mean, ref_u
     ylim([0 25]); grid on;
     set(gca, 'FontSize', 12, 'FontName', 'Times New Roman');
     
-    % Fig 4: RMS Fluctuations (å³å›¾)
+    % Fig 4: RMS Fluctuations (ÓÒÍ¼)
     subplot(1, 2, 2); hold on; box on;
     plot(yh_bot, turbh_bot(:,5), 'r-', 'LineWidth', 1.5, 'DisplayName', 'u''');
     plot(yh_bot, turbh_bot(:,6), 'g-', 'LineWidth', 1.5, 'DisplayName', 'v''');
     plot(yh_bot, turbh_bot(:,7), 'b-', 'LineWidth', 1.5, 'DisplayName', 'w''');
     
-    % --- ç»˜åˆ¶æ–‡çŒ® RMS æ•°æ® ---
+    % --- »æÖÆÎÄÏ× RMS Êı¾İ ---
     if ~isempty(ref_u)
         plot(ref_u(:,1), ref_u(:,2), 'k--', 'LineWidth', 1.2, 'DisplayName', 'u'' Ref');
     end
@@ -272,7 +244,12 @@ function draw_plots_bottom(yh_bot, turbh_bot, yh_top, turbh_top, ref_mean, ref_u
     xlim([0 60]); 
     ylim([0 4.0]); grid on;
     set(gca, 'FontSize', 12, 'FontName', 'Times New Roman');
-    sgtitle('Sumitani & Kasagi (1995) - Injection Side Only');
+    
+    % ==== ¼æÈİ¾É°æ MATLAB µÄ×Ü±êÌâ£¨Ìæ»» sgtitle£©====
+    % sgtitle('Sumitani & Kasagi (1995) - Injection Side Only');
+    axes('Position', [0 0 1 1], 'Visible', 'off');
+    text(0.5, 0.98, 'Sumitani & Kasagi (1995) - Injection Side Only', ...
+         'HorizontalAlignment', 'center', 'FontSize', 12, 'FontWeight', 'bold');
 end
 
 function [y,u,du,w,p,ur,vr,wr,pr,wx,wy,wz] = load_lm(d, f1, f2, f3)

@@ -16,6 +16,7 @@ dx = xlength / nxp;
 % 吹吸与时间参数 (Case S)
 alpha = 5.0;            
 A_quad = 0.02986;       
+% A_quad = 0.036216;
 lambda_t = 2 * pi / alpha; 
 
 % ==== 动参考系关键时间参数 ====
@@ -32,16 +33,17 @@ nzp_out = nzp / zskip;
 nyp_out = (nyp + 1) / yskip; % 192
 
 %% 2. 批量读取与绝对相位映射
-data_folder = 'H:\dns_2026\Quadrio2007\f5_v_uCRF=0\'; 
-dns_dir = 'H:\dns_2026\Quadrio2007\f5_v_uCRF=0';  
-file_pattern = fullfile(data_folder, 'restart*.dat');
+data_folder = 'H:\dns_2026\Quadrio2007\f5_0.47\'; 
+dns_dir = 'H:\dns_2026\Quadrio2007\f5_0.47';  
+% file_pattern = fullfile(data_folder, 'restart*.dat');
+file_pattern = fullfile(data_folder, 'dns_data*.dat');
 files = dir(file_pattern);
 num_files = length(files);
 
 fname_stat   = 'stat.dat';
 fname_prgrad = 'prgrad.dat';
 fname_mesh   = 'mesh.dat';
-
+% plot(prgrad, 'r-', 'LineWidth', 1.5);
 % 【修改】读取 mesh.dat 以获取网格坐标，修复 xyz 未定义错误
 xyz = importdata(fullfile(dns_dir, fname_mesh));
 
@@ -145,15 +147,15 @@ v_wall_plus = (A_quad * cos(alpha .* bin_centers * lambda_t)) / Utau;
 %% 4. 绘图展示
 figure('Position', [150, 150, 750, 500], 'Color', 'w');
 
-% 左轴：局部摩擦系数
+% 左轴：局部摩擦系数（黑色实线，无数据点）
 yyaxis left
-plot(bin_centers, binned_cf, '-ok', 'LineWidth', 1.5, 'MarkerFaceColor', 'k', 'MarkerSize', 5);
+plot(bin_centers, binned_cf, '-b', 'LineWidth', 1.5);
 ylabel('$\widetilde{C}_f / \overline{C}_f$', 'Interpreter', 'latex', 'FontSize', 18);
-ylim([0.0 2.5]); 
+ylim([0 2.5]);   % 适当放宽以容纳参考线峰值
 ax = gca;
 ax.YColor = 'k';
 
-% 右轴：吹吸速度分布
+% 右轴：吹吸速度分布（红色虚线）
 yyaxis right
 plot(bin_centers, v_wall_plus, '--r', 'LineWidth', 2);
 ylabel('$V_w^+$', 'Interpreter', 'latex', 'FontSize', 18);
@@ -161,10 +163,34 @@ ylim([-0.5 0.5]);
 ax = gca;
 ax.YColor = 'r';
 
+% ==== 用户指定参考线文件路径 ====
+ref_file_path = 'H:\dns_2026\Quadrio2007\dragc.txt';   % 请修改为您的实际路径
+
+if exist(ref_file_path, 'file')
+    % 使用 importdata 读取逗号分隔文件
+    ref_data = importdata(ref_file_path);
+    if isstruct(ref_data)
+        % importdata 可能返回结构体，数据在 .data 字段
+        ref_array = ref_data.data;
+    else
+        % 直接返回数值矩阵
+        ref_array = ref_data;
+    end
+    ref_x = ref_array(:, 1);
+    ref_y = ref_array(:, 2);
+    
+    yyaxis left
+    hold on;
+    plot(ref_x, ref_y, '-k', 'LineWidth', 1.5, 'DisplayName', 'Reference (dragc)');
+    hold off;
+else
+    warning('参考线文件未找到：%s', ref_file_path);
+end
+
 xlabel('$x / \lambda_x$', 'Interpreter', 'latex', 'FontSize', 18);
 xlim([0 1]);
 xticks(0:0.2:1);
 grid on;
 title(sprintf('Phase-averaged Local Friction (Case S: \\alpha=5.0, Samples: %d)', num_files), 'FontSize', 14);
-legend('Local Friction (Cf) - Phase Binned', 'Transpiration Velocity (V_w)', 'Location', 'northeast');
+legend('Local Friction (Cf) - Phase Binned', 'Transpiration Velocity (V_w)', 'Reference (dragc)', 'Location', 'northeast');
 fprintf('\n处理完成！\n');

@@ -1,44 +1,45 @@
 function plot_velocity_profiles
     clc; close all;
     % =========================================================================
-    % 1. åŸºç¡€é…ç½®
+    % 1. »ù´¡ÅäÖÃ
     % =========================================================================
-    dns_dir = 'E:\sce_workfile\cfd_matlab_code\Re_150_UB_ag40000';   
+    dns_dir = 'H:\dns_2026\work\work\cfd_matlab_code\Re_150_UB_ag60000_newbc';   
     fname_stat = 'stat.dat';
     fname_mesh = 'mesh.dat';
-   
-    % --- ç‰©ç†å‚æ•° ---
+    % plot(prgrad, 'r-', 'LineWidth', 1.5);
+    Up_file_path = 'H:\dns_2026\work\work\cfd_matlab_code\Up.txt';   % ÇëĞŞ¸ÄÎªÊµ¼ÊÂ·¾¶
+    % --- ÎïÀí²ÎÊı ---
     nu = 4.5903E-4;  
     
-    % --- ç½‘æ ¼å‚æ•° ---
+    % --- Íø¸ñ²ÎÊı ---
     x_length = 128/2;      
     % y_length = 127+1;  
     y_length = 191+1;
     z_length = 128/2;    
     
     % =========================================================================
-    % 2. æ•°æ®è¯»å–
+    % 2. Êı¾İ¶ÁÈ¡
     % =========================================================================
     
-    % --- è¯»å–ç½‘æ ¼ ---
+    % --- ¶ÁÈ¡Íø¸ñ ---
     xyz = importdata(fullfile(dns_dir, fname_mesh));
     if length(xyz) ~= (x_length + y_length + z_length)
-         error('mesh.dat é•¿åº¦ä¸åŒ¹é…');
+         error('mesh.dat ³¤¶È²»Æ¥Åä');
     end
     y = xyz(x_length+1 : x_length+y_length);
     yc = y(2:end-1); 
     nyc = length(yc);
     
-    % --- è¯»å–ç»Ÿè®¡æ•°æ® ---
+    % --- ¶ÁÈ¡Í³¼ÆÊı¾İ ---
     stat = importdata(fullfile(dns_dir, fname_stat));
     data_num = 11; 
     num_steps = floor(size(stat, 1) / data_num);
     
     if size(stat, 2) ~= nyc
-        warning('stat.dat åˆ—æ•°ä¸ nyp ä¸ä¸€è‡´');
+        warning('stat.dat ÁĞÊıÓë nyp ²»Ò»ÖÂ');
     end
     
-    % ç»Ÿè®¡å¹³å‡
+    % Í³¼ÆÆ½¾ù
     stat_sum = zeros(data_num, nyc); 
     for i = 1:num_steps
         base_idx = data_num * (i-1);
@@ -46,78 +47,79 @@ function plot_velocity_profiles
     end
     stat_avg = stat_sum / num_steps;
     
-    % æå–å¹³å‡é€Ÿåº¦ U
+    % ÌáÈ¡Æ½¾ùËÙ¶È U
     um= stat_avg(4, :); 
     
-    % --- è¯»å– Up.txt (æ–‡çŒ®æ•°æ®) ---
-    % å‡è®¾æ–‡ä»¶åœ¨å½“å‰ç›®å½•ä¸‹
-    if exist('Up.txt', 'file')
-        ref_Up = importdata('Up.txt');
-        ref_Up(:,1) = ref_Up(:,1) + 1.0; %å°†æ–‡çŒ®æ•°æ®çš„ x è½´ (ç¬¬ä¸€åˆ—) + 1ï¼Œä» [-1, 1] å¹³ç§»åˆ° [0, 2]
+    % --- ¶ÁÈ¡ Up.txt (ÎÄÏ×Êı¾İ) ---
+    % ¼ÙÉèÎÄ¼şÔÚµ±Ç°Ä¿Â¼ÏÂ
+    if exist(Up_file_path, 'file')
+        ref_Up = importdata(Up_file_path);
+        ref_Up(:,1) = ref_Up(:,1) + 1.0; % ½«ÎÄÏ×Êı¾İµÄ x Öá (µÚÒ»ÁĞ) + 1£¬´Ó [-1, 1] Æ½ÒÆµ½ [0, 2]
     else
         ref_Up = [];
-        warning('æœªæ‰¾åˆ° Up.txt æ–‡ä»¶');
+        warning('Î´ÕÒµ½ Up.txt ÎÄ¼ş: %s', Up_file_path);
     end
 
     % =========================================================================
-    % 3. ç‰©ç†è®¡ç®—
+    % 3. ÎïÀí¼ÆËã
     % =========================================================================
-    % (æ­¤å¤„ä¿ç•™è®¡ç®—é€»è¾‘ï¼Œè™½ç„¶åç»­ç»˜å›¾åªç”¨äº† um_raw)
+    % (´Ë´¦±£Áô¼ÆËãÂß¼­£¬ËäÈ»ºóĞø»æÍ¼Ö»ÓÃÁË um_raw)
     
-    % --- è®¡ç®—ä¸‹å£é¢ (Injection) æ‘©æ“¦é€Ÿåº¦ ---
-y_bot = [yc(1), yc(2), yc(3), yc(4)];  % ä¸‹å£é¢æ’å€¼èŠ‚ç‚¹
-u_bot = [um(1), um(2), um(3), um(4)];  % å¯¹åº”é€Ÿåº¦å€¼
-% 3. æ‹‰æ ¼æœ—æ—¥åŸºå‡½æ•°åœ¨y_bot(1)ï¼ˆç¬¬ä¸€ä¸ªç‚¹ï¼‰å¤„çš„å¯¼æ•°è®¡ç®—
-y1_bot = y_bot(1);  % ä¸‹å£é¢ç›®æ ‡ç‚¹ï¼ˆyc(1)ï¼‰
-% åŸºå‡½æ•°L1(y)åœ¨y1_botå¤„çš„å¯¼æ•°
-dL1_bot = ((y1_bot-y_bot(2))*(y1_bot-y_bot(3)) + (y1_bot-y_bot(2))*(y1_bot-y_bot(4)) + (y1_bot-y_bot(3))*(y1_bot-y_bot(4))) / ...
-    ((y1_bot-y_bot(2))*(y1_bot-y_bot(3))*(y1_bot-y_bot(4)));
-% åŸºå‡½æ•°L2(y)åœ¨y1_botå¤„çš„å¯¼æ•°
-dL2_bot = ((y1_bot-y_bot(1))*(y1_bot-y_bot(3)) + (y1_bot-y_bot(1))*(y1_bot-y_bot(4)) + (y1_bot-y_bot(3))*(y1_bot-y_bot(4))) / ...
-    ((y_bot(2)-y_bot(1))*(y_bot(2)-y_bot(3))*(y_bot(2)-y_bot(4)));
-% åŸºå‡½æ•°L3(y)åœ¨y1_botå¤„çš„å¯¼æ•°
-dL3_bot = ((y1_bot-y_bot(1))*(y1_bot-y_bot(2)) + (y1_bot-y_bot(1))*(y1_bot-y_bot(4)) + (y1_bot-y_bot(2))*(y1_bot-y_bot(4))) / ...
-    ((y_bot(3)-y_bot(1))*(y_bot(3)-y_bot(2))*(y_bot(3)-y_bot(4)));
-% åŸºå‡½æ•°L4(y)åœ¨y1_botå¤„çš„å¯¼æ•°
-dL4_bot = ((y1_bot-y_bot(1))*(y1_bot-y_bot(2)) + (y1_bot-y_bot(1))*(y1_bot-y_bot(3)) + (y1_bot-y_bot(2))*(y1_bot-y_bot(3))) / ...
-    ((y_bot(4)-y_bot(1))*(y_bot(4)-y_bot(2))*(y_bot(4)-y_bot(3)));
+    % --- ¼ÆËãÏÂ±ÚÃæ (Injection) Ä¦²ÁËÙ¶È ---
+    y_bot = [yc(1), yc(2), yc(3), yc(4)];  % ÏÂ±ÚÃæ²åÖµ½Úµã
+    u_bot = [um(1), um(2), um(3), um(4)];  % ¶ÔÓ¦ËÙ¶ÈÖµ
+    % À­¸ñÀÊÈÕ»ùº¯ÊıÔÚ y_bot(1)£¨µÚÒ»¸öµã£©´¦µÄµ¼Êı¼ÆËã
+    y1_bot = y_bot(1);  % ÏÂ±ÚÃæÄ¿±êµã£¨yc(1)£©
+    % »ùº¯Êı L1(y) ÔÚ y1_bot ´¦µÄµ¼Êı
+    dL1_bot = ((y1_bot-y_bot(2))*(y1_bot-y_bot(3)) + (y1_bot-y_bot(2))*(y1_bot-y_bot(4)) + (y1_bot-y_bot(3))*(y1_bot-y_bot(4))) / ...
+        ((y1_bot-y_bot(2))*(y1_bot-y_bot(3))*(y1_bot-y_bot(4)));
+    % »ùº¯Êı L2(y) ÔÚ y1_bot ´¦µÄµ¼Êı
+    dL2_bot = ((y1_bot-y_bot(1))*(y1_bot-y_bot(3)) + (y1_bot-y_bot(1))*(y1_bot-y_bot(4)) + (y1_bot-y_bot(3))*(y1_bot-y_bot(4))) / ...
+        ((y_bot(2)-y_bot(1))*(y_bot(2)-y_bot(3))*(y_bot(2)-y_bot(4)));
+    % »ùº¯Êı L3(y) ÔÚ y1_bot ´¦µÄµ¼Êı
+    dL3_bot = ((y1_bot-y_bot(1))*(y1_bot-y_bot(2)) + (y1_bot-y_bot(1))*(y1_bot-y_bot(4)) + (y1_bot-y_bot(2))*(y1_bot-y_bot(4))) / ...
+        ((y_bot(3)-y_bot(1))*(y_bot(3)-y_bot(2))*(y_bot(3)-y_bot(4)));
+    % »ùº¯Êı L4(y) ÔÚ y1_bot ´¦µÄµ¼Êı
+    dL4_bot = ((y1_bot-y_bot(1))*(y1_bot-y_bot(2)) + (y1_bot-y_bot(1))*(y1_bot-y_bot(3)) + (y1_bot-y_bot(2))*(y1_bot-y_bot(3))) / ...
+        ((y_bot(4)-y_bot(1))*(y_bot(4)-y_bot(2))*(y_bot(4)-y_bot(3)));
 
-% 4. åˆå¹¶å¯¼æ•°å¾—åˆ°ä¸‹å£é¢æ¢¯åº¦
-grad_bot = u_bot(1)*dL1_bot + u_bot(2)*dL2_bot + u_bot(3)*dL3_bot + u_bot(4)*dL4_bot;
-tau_w_bot = nu * grad_bot;
+    % ºÏ²¢µ¼ÊıµÃµ½ÏÂ±ÚÃæÌİ¶È
+    grad_bot = u_bot(1)*dL1_bot + u_bot(2)*dL2_bot + u_bot(3)*dL3_bot + u_bot(4)*dL4_bot;
+    tau_w_bot = nu * grad_bot;
     Utau_bot = sqrt(abs(tau_w_bot));
     fprintf('Injection Side (Bottom) Utau = %.6f\n', Utau_bot);
     
-    % A. å…¨å±€æ•°æ®
+    % A. È«¾ÖÊı¾İ
     y_global = yc;
     U_global = um;
 
     % =========================================================================
-    % 4. ç»˜å›¾ (Global Velocity Profile Only)
+    % 4. »æÍ¼ (Global Velocity Profile Only)
     % =========================================================================
     
     figure('Units', 'pixels', 'Position', [100, 100, 600, 500], 'Color', 'w', 'Name', 'Global Velocity Profile');
     hold on; box on;
     
-    % 1. ç»˜åˆ¶ DNS å…¨å±€é€Ÿåº¦ (é»‘è‰²å®çº¿)
+    % 1. »æÖÆ DNS È«¾ÖËÙ¶È (ºÚÉ«ÊµÏß)
     p1 = plot(y_global, U_global, 'k-', 'LineWidth', 1.5);
     
-    % 2. ç»˜åˆ¶ Up.txt æ•°æ® (çº¢è‰²å®çº¿)
+    % 2. »æÖÆ Up.txt Êı¾İ (ÂÌÉ«ÊµÏß)
     if ~isempty(ref_Up)
-        % é€—å·å‰ä¸ºæ¨ªåæ ‡(y)ï¼Œé€—å·åä¸ºçºµåæ ‡(U)
+        % ¶ººÅÇ°Îªºá×ø±ê(y)£¬¶ººÅºóÎª×İ×ø±ê(U)
         p2 = plot(ref_Up(:,1), ref_Up(:,2), 'g-', 'LineWidth', 1.5);
     end
     
-    % è¾…åŠ©çº¿
-    xline(0, 'r--', 'Bottom (Inj)');
-    xline(2.0, 'b--', 'Top (Suc)');
-    xline(1.0, 'g:', 'Centerline');
+    % ¸¨ÖúÏß£¨¼æÈİ¾É°æ MATLAB£¬Ìæ»» xline Îª line£©
+    yl = ylim;
+    line([0, 0], yl, 'Color', 'r', 'LineStyle', '--', 'LineWidth', 1.5);
+    line([2.0, 2.0], yl, 'Color', 'b', 'LineStyle', '--', 'LineWidth', 1.5);
+    line([1.0, 1.0], yl, 'Color', 'g', 'LineStyle', ':', 'LineWidth', 1.5);
     
     xlabel('$y/\delta$', 'Interpreter', 'latex');
     ylabel('$\overline{U}$', 'Interpreter', 'latex');
     title('Global Mean Velocity Profile');
     
-    % è®¾ç½®åæ ‡è½´èŒƒå›´
+    % ÉèÖÃ×ø±êÖá·¶Î§
     xlim([0 2.0]); 
     if ~isempty(ref_Up)
         ylim([0 max([max(U_global), max(ref_Up(:,2))])*1.1]);
