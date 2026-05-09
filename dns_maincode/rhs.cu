@@ -309,7 +309,7 @@ __global__ void rhsy(fluid* flu, process_variables* var, dyDir* dydir, Ypara* yp
 	}
 }
 
-__global__ void correct_rhsx(fluid* flu, process_variables* var, dyDir* dydir, Ypara* ypara, double* s3tot, int ns, RK* rk)  //in dp1ns there is the mean pressure gradient to keep constant mass
+__global__ void correct_rhsx(fluid* flu, process_variables* var, dyDir* dydir, Ypara* ypara, double* s3tot, int ns, RK* rk)  
 {
 	double dp1ns = nu * (*s3tot) / nxzc / ylength * rk[ns].alpha;
 // 如果处于阶段一 (静水零横流)，则强行关闭质量反馈驱动
@@ -954,7 +954,7 @@ __global__ void update_pressure(fluid* flu, Ypara* ypara, RK* rk, int ns, cufftD
 
 }
 
-__global__ void bc_velocity(fluid* flu)
+__global__ void bc_velocity(fluid* flu, double current_time)
 {
 	int ic = threadIdx.x;
 	int kc = blockIdx.x;

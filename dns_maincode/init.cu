@@ -212,7 +212,8 @@ void init_fluid(fluid* flu)
 					flu[Ord3(ic, jc, kc, nzp, nxp)].u = 0.0;
 					flu[Ord3(ic, jc, kc, nzp, nxp)].v = 0.0;
 					flu[Ord3(ic, jc, kc, nzp, nxp)].w = 0.0;
-				} else {
+				} 
+				else {
 					// 保留你原本严格验证过的归一化逻辑
 					flu[Ord3(ic, jc, kc, nzp, nxp)].u = flu[Ord3(ic, jc, kc, nzp, nxp)].u * ubulk / uxmean - uCRF;
 					flu[Ord3(ic, jc, kc, nzp, nxp)].w = flu[Ord3(ic, jc, kc, nzp, nxp)].w - uzmean[jc];
