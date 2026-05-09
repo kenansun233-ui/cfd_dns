@@ -22,22 +22,18 @@ void init_mesh_para()
 	memset(dydir, 0, (static_cast<size_t>(nyp) + 1) * sizeof(dyDir));
 	memset(rk, 0, 3 * sizeof(RK));
 
-	/* ========================================================
-	   使用双曲正切(tanh)进行非均匀网格划分：仅在底部(y=0)极度加密 
-	   ======================================================== */
-	double gamma_mesh = 3.5; // 拉伸因子，越高底部越密
+	/* 单侧双曲正切(tanh)非均匀网格划分：仅在底部(y=0)极度加密 */
+	double gamma_mesh = 3.5; 
 
 	for (int j = 1; j <= nyp; j++)
 	{
-		double xi = (double(j) - 1.0) / nyc; // 映射到 [0, 1]
-		// xi=0 时 yp=0(极密)，xi=1 时 yp=ylength(极疏)
+		double xi = (double(j) - 1.0) / nyc; 
 		dydir[j].yp = ylength * (1.0 + tanh(gamma_mesh * (xi - 1.0)) / tanh(gamma_mesh));
 	}
-	// 强制消除浮点截断误差，确保边界严密对齐
 	dydir[1].yp = 0.0;
 	dydir[nyp].yp = ylength;
 
-	/*define para related to y-dir (无需更改后续差分逻辑，自动适应不对称网格)*/
+	/*define para related to y-dir (保留原始计算逻辑，自适应不对称)*/
 	for (int j = 1; j <= nyc; j++)
 	{
 		dydir[j].yc = 0.5 * (dydir[j].yp + dydir[j + 1].yp);
@@ -143,41 +139,32 @@ void init_mesh_para()
 void init_fluid(fluid* flu)
 {
 	int ic, jc, kc;
-
-#ifdef ZERO_CROSS_FLOW
-	// =========================================================
-	// 阶段一：纯震荡，初始化为绝对静水，避免除零崩溃
-	// =========================================================
-	for (jc = 1; jc < nyp; jc++) {
-		for (kc = 0; kc < nzp; kc++) {
-			for (ic = 0; ic < nxp; ic++) {
-				flu[Ord3(ic, jc, kc, nzp, nxp)].u = 0.0;
-				flu[Ord3(ic, jc, kc, nzp, nxp)].v = 0.0;
-				flu[Ord3(ic, jc, kc, nzp, nxp)].w = 0.0;
-				flu[Ord3(ic, jc, kc, nzp, nxp)].p = 0.0;
-			}
-		}
-	}
-#else
-	// =========================================================
-	// 阶段二：恒定横流，基于 Re_tau 的初始化
-	// =========================================================
 	double height = 0.5 * ylength;
-	double utau = Re_tau * nu / height; // 直接由定义的 Re_tau 反推摩擦速度
+
+	// 保留你原本严格验证过的雷诺数计算逻辑，但当 ubulk = 0 时规避 NaN 运算
+	double Re = 1.0; 
+	if (abs(ubulk) > 1e-12) {
+		Re = ubulk * height / nu;
+	}
+	double Retau = 0.1538 * pow(Re, 0.887741);
+	double utau = Retau * nu / height;
 
 	double uzmean[nyp] = { 0.0 };
 	double uxmean = 0.0;
+	
 	double wx = 2.0 * PI / 500.0;
 	double wz = 2.0 * PI / 200.0;
 
-	double xlength_plus = xlength * utau / nu;
-	double zlength_plus = zlength * utau / nu;
+	if (abs(ubulk) > 1e-12) {
+		double xlength_plus = xlength * utau / nu;
+		double zlength_plus = zlength * utau / nu;
 
-	int m1 = (int)(xlength_plus * wx / (2.0 * PI)) + 1;
-	int m2 = (int)(zlength_plus * wz / (2.0 * PI)) + 1;
+		int m1 = (int)(xlength_plus * wx / (2.0 * PI)) + 1;
+		int m2 = (int)(zlength_plus * wz / (2.0 * PI)) + 1;
 
-	wx = m1 * 2.0 * PI / xlength_plus;
-	wz = m2 * 2.0 * PI / zlength_plus;
+		wx = m1 * 2.0 * PI / xlength_plus;
+		wz = m2 * 2.0 * PI / zlength_plus;
+	}
 
 	std::random_device rd;  
 	std::mt19937 gen(rd());  
@@ -186,10 +173,9 @@ void init_fluid(fluid* flu)
 	for (jc = 1; jc < nyp; jc++)
 	{
 		uzmean[jc] = 0.0;
-		// 映射 ybar 以适应单侧拉伸的半空间/槽道
 		double yct = dydir[jc].yc;
 		double ybar = yct / height;
-		if (ybar > 1.0) ybar = 2.0 - ybar; // 兼容流场抛物线
+		if (ybar > 1.0) ybar = 2.0 - ybar;
 
 		for (kc = 0; kc < nzp; kc++)
 		{
@@ -211,35 +197,41 @@ void init_fluid(fluid* flu)
 		}
 		uzmean[jc] = uzmean[jc] / (nxzc);
 	}
-	uxmean = uxmean / (nxzc * ylength);
+	
+	if (abs(ubulk) > 1e-12) {
+		uxmean = uxmean / (nxzc * ylength);
+	}
 
 	for (jc = 1; jc < nyp; jc++)
 	{
 		for (kc = 0; kc < nzp; kc++)
 			for (ic = 0; ic < nxp; ic++)
 			{
-				flu[Ord3(ic, jc, kc, nzp, nxp)].u = flu[Ord3(ic, jc, kc, nzp, nxp)].u * ubulk / uxmean - uCRF;
-				flu[Ord3(ic, jc, kc, nzp, nxp)].w = flu[Ord3(ic, jc, kc, nzp, nxp)].w - uzmean[jc];
+				if (abs(ubulk) < 1e-12) {
+					// 静水直接赋 0，不破坏原逻辑
+					flu[Ord3(ic, jc, kc, nzp, nxp)].u = 0.0;
+					flu[Ord3(ic, jc, kc, nzp, nxp)].v = 0.0;
+					flu[Ord3(ic, jc, kc, nzp, nxp)].w = 0.0;
+				} else {
+					// 保留你原本严格验证过的归一化逻辑
+					flu[Ord3(ic, jc, kc, nzp, nxp)].u = flu[Ord3(ic, jc, kc, nzp, nxp)].u * ubulk / uxmean - uCRF;
+					flu[Ord3(ic, jc, kc, nzp, nxp)].w = flu[Ord3(ic, jc, kc, nzp, nxp)].w - uzmean[jc];
+				}
 			}
 	}
-#endif
 
-	/* =========================================================
-	   公共边界初始化：顶部滑移，底部震荡
-	   ========================================================= */
+	/* 边界初始化：顶部滑移，底部 Stokes */
 	for (kc = 0; kc < nzp; kc++)
 		for (ic = 0; ic < nxp; ic++)
 		{
-			// 顶部 (y=ylength): 零梯度自由滑移，代表外部自由流/边界层边缘
 			flu[Ord3(ic, nyp, kc, nzp, nxp)].u = flu[Ord3(ic, nyc, kc, nzp, nxp)].u;
 			flu[Ord3(ic, nyp, kc, nzp, nxp)].w = flu[Ord3(ic, nyc, kc, nzp, nxp)].w;
-			flu[Ord3(ic, nyp, kc, nzp, nxp)].v = 0.0;
+			flu[Ord3(ic, nyp, kc, nzp, nxp)].v = 0.0;  
 
-			// 底部 (y=0): Stokes 震荡初态 (t=0)
-			double u_wall_t0 = U_osc * cos(0.0) - uCRF; // 修正参考系转换
-			flu[Ord3(ic, 0, kc, nzp, nxp)].u = 2.0 * u_wall_t0 - flu[Ord3(ic, 1, kc, nzp, nxp)].u;
+			double initial_u_wall = U_osc * cos(0.0) - uCRF;
+			flu[Ord3(ic, 0, kc, nzp, nxp)].u = 2.0 * initial_u_wall - flu[Ord3(ic, 1, kc, nzp, nxp)].u;
 			flu[Ord3(ic, 0, kc, nzp, nxp)].w = -flu[Ord3(ic, 1, kc, nzp, nxp)].w;
-			flu[Ord3(ic, 1, kc, nzp, nxp)].v = 0.0;
+			flu[Ord3(ic, 1, kc, nzp, nxp)].v = 0.0;   
 		}
 
 	for (jc = 0; jc <= nyp; jc++)

@@ -85,50 +85,41 @@ extern process_variables* var;
 
 extern cufftDoubleComplex* prsrc;
 
-// ==============================================================================
-// 计算选择 (阶段切换)#define Restart
-// 取消注释下方宏定义进行继续计算；注释掉则从头开始
-// ==============================================================================
+
 //#define Restart
 #define Output_Restart
 
+constexpr double PI = 3.14159265358979323846264338327950288;
+
 // ==============================================================================
-// 物理模拟控制面板 (阶段切换)#define ZERO_CROSS_FLOW 
-// 取消注释下方宏定义进行“零横流验证”；注释掉则进行“高雷诺数横流研究”
+// 物理模拟控制开关 (通过注释切换)
 // ==============================================================================
 #define ZERO_CROSS_FLOW 
 
 // --- Stokes 震荡底壁控制参数 ---
 constexpr double U_osc = 1.0;          // 震荡速度振幅
 constexpr double omega = 2.0 * PI;     // 震荡圆频率 (周期 T = 1.0)
-constexpr double Re_delta = 100.0;     // 目标震荡雷诺数 (控制穿透深度和转捩)
+constexpr double Re_delta = 100.0;     // 目标震荡雷诺数 (控制穿透深度和粘度)
 
 #ifdef ZERO_CROSS_FLOW
-	// [阶段一] 零横流纯震荡 (实验室绝对静止参考系)
+	// 阶段一：纯震荡层流验证
 	constexpr double uCRF = 0.0;
 	constexpr double ubulk = 0.0;
-	// 核心：由 Re_delta 反推运动粘度，绝对保证物理相似性
-	constexpr double nu = (2.0 * U_osc * U_osc) / (omega * Re_delta * Re_delta);
+	constexpr double nu = (2.0 * U_osc * U_osc) / (omega * Re_delta * Re_delta); // 自动反推粘度
 #else
-	// [阶段二] 恒定横流 + 震荡底壁 (移动参考系)
-	constexpr double Re_tau = 180.0;   // 目标摩擦雷诺数 (横流)
-	constexpr double uCRF = 0.6666666666666666666666667; // 参考系移动速度
+	// 阶段二：定来流研究 (保留你原有的设置)
+	constexpr double uCRF = 0.0; 
 	constexpr double ubulk = 0.6666666666666666666666667;
-	constexpr double nu = 3.37668E-5;  // 横流基准粘度
+	constexpr double nu = 3.37668E-5;  
 #endif
 
-// 辅助计算：Stokes 穿透深度 (运行前请比对第一层网格高度 Delta_y1)
-constexpr double stokes_delta = sqrt(2.0 * nu / omega);
-
-// 几何与网格参数保持不变
-constexpr double PI = 3.14159265358979323846264338327950288;
 constexpr double xlength = 6.283185307;
 constexpr double ylength = 2.0;
 constexpr double zlength = 3.141592654;
+
 constexpr int nxp = 640;
 constexpr int nyp = 511;
 constexpr int nzp = 640;
-
 
 constexpr int nxc = nxp - 1;
 constexpr int nyc = nyp - 1;
@@ -220,18 +211,5 @@ struct Stat
 	double pm2;
 };
 
-
-
-/* 吹吸控制参数*/
-
-/*
-
-// 定义吹吸产生的垂直速度 V_wall
-// 建议设置为 0.005 (即千分之五的参考速度)，这是文献中的典型值。
-// 如果你想效果更剧烈，可以改成 0.01；想微弱一点，改成 0.002。
-constexpr double V_wall_blowing = 0.005; 
-
-
-*/
 
 #endif

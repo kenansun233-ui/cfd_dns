@@ -309,17 +309,13 @@ __global__ void rhsy(fluid* flu, process_variables* var, dyDir* dydir, Ypara* yp
 	}
 }
 
-__global__ void correct_rhsx(fluid* flu, process_variables* var, dyDir* dydir, Ypara* ypara, double* s3tot, int ns, RK* rk)
+__global__ void correct_rhsx(fluid* flu, process_variables* var, dyDir* dydir, Ypara* ypara, double* s3tot, int ns, RK* rk)  //in dp1ns there is the mean pressure gradient to keep constant mass
 {
-#ifdef ZERO_CROSS_FLOW
-	double dp1ns = 0.0; // 纯震荡流，无平均来流驱动
-#else
-	// 恒定压力梯度 (CPG) 驱动
-	// 基于开放顶部的物理深度为 ylength，求取对应摩擦速度的源项
-	double target_utau = Re_tau * nu / (0.5 * ylength); 
-	double mean_pressure_grad = (target_utau * target_utau) / ylength; 
-	double dp1ns = mean_pressure_grad * rk[ns].alpha;
-#endif
+	double dp1ns = nu * (*s3tot) / nxzc / ylength * rk[ns].alpha;
+// 如果处于阶段一 (静水零横流)，则强行关闭质量反馈驱动
+	if (abs(ubulk) < 1e-12) {
+		dp1ns = 0.0;
+	}
 
 	int ic = blockIdx.x * blockDim.x + threadIdx.x;
 	int jc = blockIdx.y * blockDim.y + threadIdx.y + 1;
@@ -327,8 +323,8 @@ __global__ void correct_rhsx(fluid* flu, process_variables* var, dyDir* dydir, Y
 
 	if (kc < nzp && jc < nyp && ic < nxp)
 	{
-		// 施加驱动力 (源项为正向推进)
-		var[d_Ord3(ic, jc, kc, nzp, nxp)].rhsx = var[d_Ord3(ic, jc, kc, nzp, nxp)].rhsx + dp1ns;
+		var[d_Ord3(ic, jc, kc, nzp, nxp)].rhsx = var[d_Ord3(ic, jc, kc, nzp, nxp)].rhsx - dp1ns;
+
 	}
 }
 
@@ -351,6 +347,8 @@ void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, doubl
 {
 	//cusparseHandle_t handle;
 	//CHECK_CUSPARSE(cusparseCreate(&handle));
+
+
 
 	for (int k = 0; k < nzp; k++)
 	{
@@ -956,32 +954,23 @@ __global__ void update_pressure(fluid* flu, Ypara* ypara, RK* rk, int ns, cufftD
 
 }
 
-__global__ void bc_velocity(fluid* flu, double current_time)
+__global__ void bc_velocity(fluid* flu)
 {
 	int ic = threadIdx.x;
 	int kc = blockIdx.x;
 
 	if (kc < nzp && ic < nxp) {
 
-		// ==========================================
-		// 1. 顶部 (y = ylength) - 自由滑移/零梯度边界
-		// ==========================================
-		flu[d_Ord3(ic, nyp, kc, nzp, nxp)].v = 0.0;
-
-		// 零梯度：u[nyp] = u[nyc]，完美契合半无限空间假设
+		// 顶部：自由滑移/零梯度
+		flu[d_Ord3(ic, nyp, kc, nzp, nxp)].v = 0.0; 
 		flu[d_Ord3(ic, nyp, kc, nzp, nxp)].u = flu[d_Ord3(ic, nyc, kc, nzp, nxp)].u;
 		flu[d_Ord3(ic, nyp, kc, nzp, nxp)].w = flu[d_Ord3(ic, nyc, kc, nzp, nxp)].w;
 
-		// ==========================================
-		// 2. 底部 (y = 0) - Stokes 震荡底壁
-		// ==========================================
-		flu[d_Ord3(ic, 1, kc, nzp, nxp)].v = 0.0;
-
-		// 计算给定时间的绝对物理速度，并减去参考系平移速度 uCRF 以实现伽利略不变性！
+		// 底部：Stokes震荡壁面
+		flu[d_Ord3(ic, 1, kc, nzp, nxp)].v = 0.0; 
 		double u_wall = U_osc * cos(omega * current_time) - uCRF;
-
 		flu[d_Ord3(ic, 0, kc, nzp, nxp)].u = 2.0 * u_wall - flu[d_Ord3(ic, 1, kc, nzp, nxp)].u;
-		flu[d_Ord3(ic, 0, kc, nzp, nxp)].w = -flu[d_Ord3(ic, 1, kc, nzp, nxp)].w; // z向绝对静止
+		flu[d_Ord3(ic, 0, kc, nzp, nxp)].w = -flu[d_Ord3(ic, 1, kc, nzp, nxp)].w;
 	}
 }
 
@@ -1046,20 +1035,25 @@ __global__ void BackwardSubstitution(int m, int n, double* fj, double* arrmn) {
 
 // ��������ֻ���� GPU ����������
 void InverseTridiagonalDevice(int m, int n, double* aj, double* bj, double* cj, double* fj) {
-
+	// �����Ż�
 	double* d_vecm, * d_arrmn;
+
+	// �豸���ڴ���䣨������ֲ��м�����
 	cudaMalloc((void**)&d_vecm, m * sizeof(double));
 	cudaMalloc((void**)&d_arrmn, m * n * sizeof(double));
 
 	int threadsPerBlock = 1024;
 	int blocksPerGrid = (m + threadsPerBlock - 1) / threadsPerBlock;
 
+	// ǰ����ȥ
 	ForwardElimination << <blocksPerGrid, threadsPerBlock >> > (m, n, aj, bj, cj, fj, d_vecm, d_arrmn);
 	cudaDeviceSynchronize();
 
+	// ����ش�
 	BackwardSubstitution << <blocksPerGrid, threadsPerBlock >> > (m, n, fj, d_arrmn);
 	cudaDeviceSynchronize();
-	
+
+	// �����豸���ڴ�
 	cudaFree(d_vecm);
 	cudaFree(d_arrmn);
 }
@@ -1239,50 +1233,84 @@ void calcuate()
 	start = clock();
 	for (int t = 0; t <= timemax; t++)
 	{
-		// 计算物理基准时间 (对于边值的处理取当前步时间即可)
-		double current_time = t * dt; 
+        // 计算当前物理时间，用于传递给含时边界
+		double current_time = t * dt;
 
 		for (int ns = 0; ns < 3; ns++)
 		{
 			CHECK_CUDA(cudaMemcpy(s3tot, &zero, sizeof(double), cudaMemcpyHostToDevice));
 
-			Update_VelInterp_uvw << < gridDim, blockDim >> > (flu, uxhx, uyhx, uzhx, uxhz, uyhz, uzhz);
+			Update_VelInterp_uvw << < gridDim, blockDim >> > (flu, uxhx, uyhx, uzhx, uxhz, uyhz, uzhz);  //flu ��Ҫ��gpu�϶���
 			rhsx << < gridDim, blockDim >> > (flu, var, dydir_device, ypara_device, uxhx, uyhx, uzhx, uxhz, uyhz, uzhz, ns, s3tot, rk_device);
 			rhsy << < gridDim, blockDim >> > (flu, var, dydir_device, ypara_device, uxhx, uyhx, uzhx, uxhz, uyhz, uzhz, ns, rk_device);
 			rhsz << < gridDim, blockDim >> > (flu, var, dydir_device, ypara_device, uxhx, uyhx, uzhx, uxhz, uyhz, uzhz, ns, rk_device);
 			cudaDeviceSynchronize();
 
 			correct_rhsx << < gridDim, blockDim >> > (flu, var, dydir_device, ypara_device, s3tot, ns, rk_device);
+
 			cudaDeviceSynchronize();
+			//for (int k = 0; k < nzp; k++)
+			//{
+			//	uhat_coe << <nyc, nxp >> > (var, ypara_device, ns, aa, bb, cc, dd, k, rk_device); cudaDeviceSynchronize();
+			//	//test << <nyc, nxp >> > (aa, bb, cc, dd);
+			//	CHECK_CUDA(cudaMemcpy(h_d, cc, nxp * nyc * sizeof(double), cudaMemcpyDeviceToHost));
+			//	for (int i = 0; i < nyc; i++)
+			//	{
+			//		std::cout << h_d[i] << std::endl;
+			//	}
+			//	CHECK_CUSPARSE(cusparseDgtsv2StridedBatch_bufferSizeExt(handle, nyc, aa, bb, cc, dd, nxp, nyc, &bufferSize));
+			//	CHECK_CUDA(cudaMalloc(&buffer, bufferSize));
+			//	CHECK_CUSPARSE(cusparseDgtsv2StridedBatch(handle, nyc, aa, bb, cc, dd, nxp, nyc, buffer));
+			//	uhat_update << <nxp, nyp >> > (flu, dd, k);
+			//	cudaDeviceSynchronize();
+			//	CHECK_CUDA(cudaFree(buffer));
+			//}
 
 			uhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device);
 			what_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device);
 			vhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device);
 
-			// 第一次调用：传入 current_time
 			bc_velocity << < nzp, nxp >> > (flu, current_time);
+
+			/*吹吸边界条件*/
+            /*
+			double current_time = t * dt;
+            bc_velocity << < nzp, nxp >> > (flu, current_time);
+			*/
+			
 
 			/*PPE*/
 			cudaMemcpy(divmax, &zero, sizeof(double), cudaMemcpyHostToDevice);
+
+
 			clcprsrc << < gridDim, blockDim >> > (flu, var, dydir_device, ns, divmax, rk_device, prsrc);
 
 			CHECK_CUFFT(cufftExecZ2Z(plan, (cufftDoubleComplex*)prsrc, (cufftDoubleComplex*)prsrc, CUFFT_FORWARD)); cudaDeviceSynchronize();
-			clcPPE_1025(ypara_device, ak1, ak3, prsrc, aa, bb, cc, dd, pp, handle);
-			CHECK_CUFFT(cufftExecZ2Z(plan, (cufftDoubleComplex*)prsrc, (cufftDoubleComplex*)prsrc, CUFFT_INVERSE)); cudaDeviceSynchronize();
-			
-			bc_prsrc << < nzp, nxp >> > (prsrc);
 
+			clcPPE_1025(ypara_device, ak1, ak3, prsrc, aa, bb, cc, dd, pp, handle);
+
+			//clcPPE << < nzp, nxp >> > (flu, var, ypara_device, ak1, ak3, prsrc); cudaDeviceSynchronize();
+
+			CHECK_CUFFT(cufftExecZ2Z(plan, (cufftDoubleComplex*)prsrc, (cufftDoubleComplex*)prsrc, CUFFT_INVERSE)); cudaDeviceSynchronize();
+			bc_prsrc << < nzp, nxp >> > (prsrc);
+			/*PPE*/
+
+
+			//bc_velocity << < nzp, nxp >> > (flu);
 			/*update*/
 			update_velocity << < gridDim, blockDim >> > (flu, dydir_device, rk_device, ns, prsrc);
+			//update_v_dir_velocity << < gridDim, blockDim >> > (flu, dydir_device, rk_device, ns, prsrc);
 			update_pressure << < gridDim, blockDim >> > (flu, ypara_device, rk_device, ns, prsrc); cudaDeviceSynchronize();
 
 			bc_presure << < nzp, nxp >> > (flu); cudaDeviceSynchronize();
 
-			// 第二次调用：传入 current_time
 			bc_velocity << < nzp, nxp >> > (flu, current_time);
+
+			/*update*/
 
 			CHECK_CUDA(cudaMemcpy(&s3tot_host, s3tot, sizeof(double), cudaMemcpyDeviceToHost));
 			prgradaver += nu * (s3tot_host) / nxzc / ylength * rk[ns].alpha / dt;
+
 		}
 
 
@@ -1322,6 +1350,21 @@ void calcuate()
 			//output_velocity(flu, flu_host, t);
 			output_restart(flu, flu_host, var);
 		}
+
+		// ===== 修改：一气呵成的工作流 =====
+		// 仅在 25000 步稳定后，至 30000 步期间，每 10 步采样一次 (共获取 500 个样本)
+		if (t > 25000 && t <= 30000 && t % 10 == 0)
+		{
+			accumulate_tau_w(flu);  // 调用我们新写的极速 GPU 累加器
+		}
+
+		// 在第 30000 步彻底结束时，一键输出结果
+		if (t == 30000)
+		{
+			output_fig5(); 
+		}
+		// ==================================
+
 #endif
 	}
 
