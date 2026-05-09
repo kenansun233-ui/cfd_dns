@@ -55,9 +55,8 @@ __global__ void what_coe(process_variables* var, Ypara* ypara, int ns, double* a
 void what_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk);
 __global__ void what_update(fluid* flu, double* d, int k);
 
-__global__ void bc_velocity(fluid* flu);
-/*吹吸边界速度函数声明*/
-//__global__ void bc_velocity(fluid* flu, double time);
+//__global__ void bc_velocity(fluid* flu);
+__global__ void bc_velocity(fluid* flu, double current_time);
 
 __global__ void bc_prsrc(cufftDoubleComplex* prsrc);
 

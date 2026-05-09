@@ -309,9 +309,17 @@ __global__ void rhsy(fluid* flu, process_variables* var, dyDir* dydir, Ypara* yp
 	}
 }
 
-__global__ void correct_rhsx(fluid* flu, process_variables* var, dyDir* dydir, Ypara* ypara, double* s3tot, int ns, RK* rk)  //in dp1ns there is the mean pressure gradient to keep constant mass
+__global__ void correct_rhsx(fluid* flu, process_variables* var, dyDir* dydir, Ypara* ypara, double* s3tot, int ns, RK* rk)
 {
-	double dp1ns = nu * (*s3tot) / nxzc / ylength * rk[ns].alpha;
+#ifdef ZERO_CROSS_FLOW
+	double dp1ns = 0.0; // 纯震荡流，无平均来流驱动
+#else
+	// 恒定压力梯度 (CPG) 驱动
+	// 基于开放顶部的物理深度为 ylength，求取对应摩擦速度的源项
+	double target_utau = Re_tau * nu / (0.5 * ylength); 
+	double mean_pressure_grad = (target_utau * target_utau) / ylength; 
+	double dp1ns = mean_pressure_grad * rk[ns].alpha;
+#endif
 
 	int ic = blockIdx.x * blockDim.x + threadIdx.x;
 	int jc = blockIdx.y * blockDim.y + threadIdx.y + 1;
@@ -319,11 +327,8 @@ __global__ void correct_rhsx(fluid* flu, process_variables* var, dyDir* dydir, Y
 
 	if (kc < nzp && jc < nyp && ic < nxp)
 	{
-		var[d_Ord3(ic, jc, kc, nzp, nxp)].rhsx = var[d_Ord3(ic, jc, kc, nzp, nxp)].rhsx - dp1ns;
-
-		//if (ic == 100 && jc == 100) {
-		//	printf("i %d: k[%d] j[%d] ns[%d]=      %f,        %f,       %f\n", ic, kc, jc, ns, dp1ns, s3tot, *s3tot);
-		//}
+		// 施加驱动力 (源项为正向推进)
+		var[d_Ord3(ic, jc, kc, nzp, nxp)].rhsx = var[d_Ord3(ic, jc, kc, nzp, nxp)].rhsx + dp1ns;
 	}
 }
 
@@ -951,62 +956,34 @@ __global__ void update_pressure(fluid* flu, Ypara* ypara, RK* rk, int ns, cufftD
 
 }
 
-__global__ void bc_velocity(fluid* flu)
+__global__ void bc_velocity(fluid* flu, double current_time)
 {
 	int ic = threadIdx.x;
 	int kc = blockIdx.x;
 
 	if (kc < nzp && ic < nxp) {
 
-		//flu[d_Ord3(ic, nyc, kc, nzp, nxp)].v = 0.0;//nyc?
-	    flu[d_Ord3(ic, nyp, kc, nzp, nxp)].v = 0.0; //nyp是上壁面
-		flu[d_Ord3(ic, 1, kc, nzp, nxp)].v = 0.0;  //1是下壁面
+		// ==========================================
+		// 1. 顶部 (y = ylength) - 自由滑移/零梯度边界
+		// ==========================================
+		flu[d_Ord3(ic, nyp, kc, nzp, nxp)].v = 0.0;
 
-		flu[d_Ord3(ic, nyp, kc, nzp, nxp)].u = -2.0 * uCRF - flu[d_Ord3(ic, nyc, kc, nzp, nxp)].u;
-		flu[d_Ord3(ic, 0, kc, nzp, nxp)].u = -2.0 * uCRF - flu[d_Ord3(ic, 1, kc, nzp, nxp)].u;
+		// 零梯度：u[nyp] = u[nyc]，完美契合半无限空间假设
+		flu[d_Ord3(ic, nyp, kc, nzp, nxp)].u = flu[d_Ord3(ic, nyc, kc, nzp, nxp)].u;
+		flu[d_Ord3(ic, nyp, kc, nzp, nxp)].w = flu[d_Ord3(ic, nyc, kc, nzp, nxp)].w;
 
-		flu[d_Ord3(ic, nyp, kc, nzp, nxp)].w = -flu[d_Ord3(ic, nyc, kc, nzp, nxp)].w;
-		flu[d_Ord3(ic, 0, kc, nzp, nxp)].w = -flu[d_Ord3(ic, 1, kc, nzp, nxp)].w;
+		// ==========================================
+		// 2. 底部 (y = 0) - Stokes 震荡底壁
+		// ==========================================
+		flu[d_Ord3(ic, 1, kc, nzp, nxp)].v = 0.0;
+
+		// 计算给定时间的绝对物理速度，并减去参考系平移速度 uCRF 以实现伽利略不变性！
+		double u_wall = U_osc * cos(omega * current_time) - uCRF;
+
+		flu[d_Ord3(ic, 0, kc, nzp, nxp)].u = 2.0 * u_wall - flu[d_Ord3(ic, 1, kc, nzp, nxp)].u;
+		flu[d_Ord3(ic, 0, kc, nzp, nxp)].w = -flu[d_Ord3(ic, 1, kc, nzp, nxp)].w; // z向绝对静止
 	}
 }
-
-
-/*逻辑：下壁面吹入 (+v)，上壁面吸出 (+v)，形成全场穿透流*/
-/* 
-
-__global__ void bc_velocity(fluid* flu, double time)
-{
-    // 获取当前线程对应的网格索引
-    int ic = threadIdx.x;
-    int kc = blockIdx.x;
-
-    // 只有在有效网格范围内才执行
-    if (kc < nzp && ic < nxp) {
-
-        flu[d_Ord3(ic, nyp, kc, nzp, nxp)].u = -2.0 * uCRF - flu[d_Ord3(ic, nyc, kc, nzp, nxp)].u;
-        flu[d_Ord3(ic, 0, kc, nzp, nxp)].u   = -2.0 * uCRF - flu[d_Ord3(ic, 1, kc, nzp, nxp)].u;
-
-        flu[d_Ord3(ic, nyp, kc, nzp, nxp)].w = -flu[d_Ord3(ic, nyc, kc, nzp, nxp)].w;
-        flu[d_Ord3(ic, 0, kc, nzp, nxp)].w   = -flu[d_Ord3(ic, 1, kc, nzp, nxp)].w;
-
-        // ==========================================
-        // 2. 垂直方向速度 (v) - 修改为均匀吹吸 (Uniform Blowing/Suction)
-        // ==========================================
-        // 获取我们在 parameters.h 里定义的吹气速度
-        double v_bc = V_wall_blowing;
-
-        // [下壁面 Bottom]: 吹气 (Blowing)
-        // 在 y 轴正向坐标系中，底部向上吹气意味着 v 为正值
-        flu[d_Ord3(ic, 1, kc, nzp, nxp)].v = v_bc;
-
-        // [上壁面 Top]: 吸气 (Suction)
-        // 上壁面边界同样设置正值 v。
-        // 因为 v > 0 在顶部意味着流体顺着 y 轴方向流出计算域（吸走）。
-        // 这样进出质量平衡：进多少(Bottom)，出多少(Top)。
-        flu[d_Ord3(ic, nyp, kc, nzp, nxp)].v = v_bc;
-    }
-}
-*/
 
 __global__ void bc_presure(fluid* flu)
 {
@@ -1262,88 +1239,50 @@ void calcuate()
 	start = clock();
 	for (int t = 0; t <= timemax; t++)
 	{
+		// 计算物理基准时间 (对于边值的处理取当前步时间即可)
+		double current_time = t * dt; 
 
 		for (int ns = 0; ns < 3; ns++)
 		{
 			CHECK_CUDA(cudaMemcpy(s3tot, &zero, sizeof(double), cudaMemcpyHostToDevice));
 
-			Update_VelInterp_uvw << < gridDim, blockDim >> > (flu, uxhx, uyhx, uzhx, uxhz, uyhz, uzhz);  //flu ��Ҫ��gpu�϶���
+			Update_VelInterp_uvw << < gridDim, blockDim >> > (flu, uxhx, uyhx, uzhx, uxhz, uyhz, uzhz);
 			rhsx << < gridDim, blockDim >> > (flu, var, dydir_device, ypara_device, uxhx, uyhx, uzhx, uxhz, uyhz, uzhz, ns, s3tot, rk_device);
 			rhsy << < gridDim, blockDim >> > (flu, var, dydir_device, ypara_device, uxhx, uyhx, uzhx, uxhz, uyhz, uzhz, ns, rk_device);
 			rhsz << < gridDim, blockDim >> > (flu, var, dydir_device, ypara_device, uxhx, uyhx, uzhx, uxhz, uyhz, uzhz, ns, rk_device);
 			cudaDeviceSynchronize();
 
 			correct_rhsx << < gridDim, blockDim >> > (flu, var, dydir_device, ypara_device, s3tot, ns, rk_device);
-
 			cudaDeviceSynchronize();
-			//for (int k = 0; k < nzp; k++)
-			//{
-			//	uhat_coe << <nyc, nxp >> > (var, ypara_device, ns, aa, bb, cc, dd, k, rk_device); cudaDeviceSynchronize();
-			//	//test << <nyc, nxp >> > (aa, bb, cc, dd);
-			//	CHECK_CUDA(cudaMemcpy(h_d, cc, nxp * nyc * sizeof(double), cudaMemcpyDeviceToHost));
-			//	for (int i = 0; i < nyc; i++)
-			//	{
-			//		std::cout << h_d[i] << std::endl;
-			//	}
-			//	CHECK_CUSPARSE(cusparseDgtsv2StridedBatch_bufferSizeExt(handle, nyc, aa, bb, cc, dd, nxp, nyc, &bufferSize));
-			//	CHECK_CUDA(cudaMalloc(&buffer, bufferSize));
-			//	CHECK_CUSPARSE(cusparseDgtsv2StridedBatch(handle, nyc, aa, bb, cc, dd, nxp, nyc, buffer));
-			//	uhat_update << <nxp, nyp >> > (flu, dd, k);
-			//	cudaDeviceSynchronize();
-			//	CHECK_CUDA(cudaFree(buffer));
-			//}
 
 			uhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device);
 			what_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device);
 			vhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device);
 
-			bc_velocity << < nzp, nxp >> > (flu);
-
-			/*吹吸边界条件*/
-            /*
-			double current_time = t * dt;
-            bc_velocity << < nzp, nxp >> > (flu, current_time);
-			*/
-			
+			// 第一次调用：传入 current_time
+			bc_velocity << < nzp, nxp >> > (flu, current_time);
 
 			/*PPE*/
 			cudaMemcpy(divmax, &zero, sizeof(double), cudaMemcpyHostToDevice);
-
-
 			clcprsrc << < gridDim, blockDim >> > (flu, var, dydir_device, ns, divmax, rk_device, prsrc);
 
 			CHECK_CUFFT(cufftExecZ2Z(plan, (cufftDoubleComplex*)prsrc, (cufftDoubleComplex*)prsrc, CUFFT_FORWARD)); cudaDeviceSynchronize();
-
 			clcPPE_1025(ypara_device, ak1, ak3, prsrc, aa, bb, cc, dd, pp, handle);
-
-			//clcPPE << < nzp, nxp >> > (flu, var, ypara_device, ak1, ak3, prsrc); cudaDeviceSynchronize();
-
 			CHECK_CUFFT(cufftExecZ2Z(plan, (cufftDoubleComplex*)prsrc, (cufftDoubleComplex*)prsrc, CUFFT_INVERSE)); cudaDeviceSynchronize();
+			
 			bc_prsrc << < nzp, nxp >> > (prsrc);
-			/*PPE*/
 
-
-			//bc_velocity << < nzp, nxp >> > (flu);
 			/*update*/
 			update_velocity << < gridDim, blockDim >> > (flu, dydir_device, rk_device, ns, prsrc);
-			//update_v_dir_velocity << < gridDim, blockDim >> > (flu, dydir_device, rk_device, ns, prsrc);
 			update_pressure << < gridDim, blockDim >> > (flu, ypara_device, rk_device, ns, prsrc); cudaDeviceSynchronize();
 
 			bc_presure << < nzp, nxp >> > (flu); cudaDeviceSynchronize();
 
-			bc_velocity << < nzp, nxp >> > (flu);
-
-			/*吹吸边界条件*/
-            /*
-            bc_velocity << < nzp, nxp >> > (flu, current_time);
-			*/
-
-
-			/*update*/
+			// 第二次调用：传入 current_time
+			bc_velocity << < nzp, nxp >> > (flu, current_time);
 
 			CHECK_CUDA(cudaMemcpy(&s3tot_host, s3tot, sizeof(double), cudaMemcpyDeviceToHost));
 			prgradaver += nu * (s3tot_host) / nxzc / ylength * rk[ns].alpha / dt;
-
 		}
 
 
