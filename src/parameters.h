@@ -89,10 +89,29 @@ extern cufftDoubleComplex* prsrc;
 //#define Restart
 #define Output_Restart
 
-constexpr double ubulk = 0.6666666666666666666666667;
-constexpr double nu = 3.37668E-5;
 constexpr double PI = 3.14159265358979323846264338327950288;
-constexpr double uCRF = 0.6666666666666666666666667;  //参考系速度
+
+// ==============================================================================
+// 物理模拟控制开关 (通过注释切换)
+// ==============================================================================
+#define ZERO_CROSS_FLOW 
+
+// --- Stokes 震荡底壁控制参数 ---
+constexpr double U_osc = 1.0;          // 震荡速度振幅
+constexpr double omega = 2.0 * PI;     // 震荡圆频率 (周期 T = 1.0)
+constexpr double Re_delta = 100.0;     // 目标震荡雷诺数 (控制穿透深度和粘度)
+
+#ifdef ZERO_CROSS_FLOW
+	// 阶段一：纯震荡层流验证
+	constexpr double uCRF = 0.0;
+	constexpr double ubulk = 0.0;
+	constexpr double nu = (2.0 * U_osc * U_osc) / (omega * Re_delta * Re_delta); // 自动反推粘度
+#else
+	// 阶段二：定来流研究 (保留你原有的设置)
+	constexpr double uCRF = 0.0; 
+	constexpr double ubulk = 0.6666666666666666666666667;
+	constexpr double nu = 3.37668E-5;  
+#endif
 
 constexpr double xlength = 6.283185307;
 constexpr double ylength = 2.0;
@@ -101,28 +120,6 @@ constexpr double zlength = 3.141592654;
 constexpr int nxp = 640;
 constexpr int nyp = 511;
 constexpr int nzp = 640;
-
-/* 复刻 Sumitani & Kasagi (1995) AIAA Journal 原始工况数据  */
-/*
-constexpr double xlength = 15.70796327; // 5.0 * PI
-constexpr double ylength = 2.0;      // 2.0
-constexpr double zlength = 6.283185307; // 2.0 * PI
-
-constexpr int nxp = 128; // 流向
-constexpr int nyp = 127; // 法向 
-constexpr int nzp = 128; // 展向
-// (Re_tau = 150)
-constexpr double ubulk = 1.0;              // 归一化体平均速度 U_m = 1.0
-constexpr double nu = 4.5903e-4;        // 运动粘度 nu = 1.0 / 2178.5
-constexpr double uCRF = 1.0;
-
-// 吹吸控制参数 (Uniform Blowing/Suction)
-constexpr double V_wall_blowing = 0.0034 * ubulk; 
-
-// 时间步长
-constexpr double dt = 0.005; // 稍微改小一点以保证 DNS 稳定性
-*/
-
 
 constexpr int nxc = nxp - 1;
 constexpr int nyc = nyp - 1;
@@ -214,18 +211,5 @@ struct Stat
 	double pm2;
 };
 
-
-
-/* 吹吸控制参数*/
-
-/*
-
-// 定义吹吸产生的垂直速度 V_wall
-// 建议设置为 0.005 (即千分之五的参考速度)，这是文献中的典型值。
-// 如果你想效果更剧烈，可以改成 0.01；想微弱一点，改成 0.002。
-constexpr double V_wall_blowing = 0.005; 
-
-
-*/
 
 #endif

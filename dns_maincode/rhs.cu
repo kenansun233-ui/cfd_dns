@@ -309,9 +309,13 @@ __global__ void rhsy(fluid* flu, process_variables* var, dyDir* dydir, Ypara* yp
 	}
 }
 
-__global__ void correct_rhsx(fluid* flu, process_variables* var, dyDir* dydir, Ypara* ypara, double* s3tot, int ns, RK* rk)  //in dp1ns there is the mean pressure gradient to keep constant mass
+__global__ void correct_rhsx(fluid* flu, process_variables* var, dyDir* dydir, Ypara* ypara, double* s3tot, int ns, RK* rk)  
 {
 	double dp1ns = nu * (*s3tot) / nxzc / ylength * rk[ns].alpha;
+// 如果处于阶段一 (静水零横流)，则强行关闭质量反馈驱动
+	if (abs(ubulk) < 1e-12) {
+		dp1ns = 0.0;
+	}
 
 	int ic = blockIdx.x * blockDim.x + threadIdx.x;
 	int jc = blockIdx.y * blockDim.y + threadIdx.y + 1;
@@ -321,9 +325,6 @@ __global__ void correct_rhsx(fluid* flu, process_variables* var, dyDir* dydir, Y
 	{
 		var[d_Ord3(ic, jc, kc, nzp, nxp)].rhsx = var[d_Ord3(ic, jc, kc, nzp, nxp)].rhsx - dp1ns;
 
-		//if (ic == 100 && jc == 100) {
-		//	printf("i %d: k[%d] j[%d] ns[%d]=      %f,        %f,       %f\n", ic, kc, jc, ns, dp1ns, s3tot, *s3tot);
-		//}
 	}
 }
 
@@ -346,6 +347,8 @@ void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, doubl
 {
 	//cusparseHandle_t handle;
 	//CHECK_CUSPARSE(cusparseCreate(&handle));
+
+
 
 	for (int k = 0; k < nzp; k++)
 	{
@@ -951,62 +954,25 @@ __global__ void update_pressure(fluid* flu, Ypara* ypara, RK* rk, int ns, cufftD
 
 }
 
-__global__ void bc_velocity(fluid* flu)
+__global__ void bc_velocity(fluid* flu, double current_time)
 {
 	int ic = threadIdx.x;
 	int kc = blockIdx.x;
 
 	if (kc < nzp && ic < nxp) {
 
-		//flu[d_Ord3(ic, nyc, kc, nzp, nxp)].v = 0.0;//nyc?
-	    flu[d_Ord3(ic, nyp, kc, nzp, nxp)].v = 0.0; //nyp是上壁面
-		flu[d_Ord3(ic, 1, kc, nzp, nxp)].v = 0.0;  //1是下壁面
+		// 顶部：自由滑移/零梯度
+		flu[d_Ord3(ic, nyp, kc, nzp, nxp)].v = 0.0; 
+		flu[d_Ord3(ic, nyp, kc, nzp, nxp)].u = flu[d_Ord3(ic, nyc, kc, nzp, nxp)].u;
+		flu[d_Ord3(ic, nyp, kc, nzp, nxp)].w = flu[d_Ord3(ic, nyc, kc, nzp, nxp)].w;
 
-		flu[d_Ord3(ic, nyp, kc, nzp, nxp)].u = -2.0 * uCRF - flu[d_Ord3(ic, nyc, kc, nzp, nxp)].u;
-		flu[d_Ord3(ic, 0, kc, nzp, nxp)].u = -2.0 * uCRF - flu[d_Ord3(ic, 1, kc, nzp, nxp)].u;
-
-		flu[d_Ord3(ic, nyp, kc, nzp, nxp)].w = -flu[d_Ord3(ic, nyc, kc, nzp, nxp)].w;
+		// 底部：Stokes震荡壁面
+		flu[d_Ord3(ic, 1, kc, nzp, nxp)].v = 0.0; 
+		double u_wall = U_osc * cos(omega * current_time) - uCRF;
+		flu[d_Ord3(ic, 0, kc, nzp, nxp)].u = 2.0 * u_wall - flu[d_Ord3(ic, 1, kc, nzp, nxp)].u;
 		flu[d_Ord3(ic, 0, kc, nzp, nxp)].w = -flu[d_Ord3(ic, 1, kc, nzp, nxp)].w;
 	}
 }
-
-
-/*逻辑：下壁面吹入 (+v)，上壁面吸出 (+v)，形成全场穿透流*/
-/* 
-
-__global__ void bc_velocity(fluid* flu, double time)
-{
-    // 获取当前线程对应的网格索引
-    int ic = threadIdx.x;
-    int kc = blockIdx.x;
-
-    // 只有在有效网格范围内才执行
-    if (kc < nzp && ic < nxp) {
-
-        flu[d_Ord3(ic, nyp, kc, nzp, nxp)].u = -2.0 * uCRF - flu[d_Ord3(ic, nyc, kc, nzp, nxp)].u;
-        flu[d_Ord3(ic, 0, kc, nzp, nxp)].u   = -2.0 * uCRF - flu[d_Ord3(ic, 1, kc, nzp, nxp)].u;
-
-        flu[d_Ord3(ic, nyp, kc, nzp, nxp)].w = -flu[d_Ord3(ic, nyc, kc, nzp, nxp)].w;
-        flu[d_Ord3(ic, 0, kc, nzp, nxp)].w   = -flu[d_Ord3(ic, 1, kc, nzp, nxp)].w;
-
-        // ==========================================
-        // 2. 垂直方向速度 (v) - 修改为均匀吹吸 (Uniform Blowing/Suction)
-        // ==========================================
-        // 获取我们在 parameters.h 里定义的吹气速度
-        double v_bc = V_wall_blowing;
-
-        // [下壁面 Bottom]: 吹气 (Blowing)
-        // 在 y 轴正向坐标系中，底部向上吹气意味着 v 为正值
-        flu[d_Ord3(ic, 1, kc, nzp, nxp)].v = v_bc;
-
-        // [上壁面 Top]: 吸气 (Suction)
-        // 上壁面边界同样设置正值 v。
-        // 因为 v > 0 在顶部意味着流体顺着 y 轴方向流出计算域（吸走）。
-        // 这样进出质量平衡：进多少(Bottom)，出多少(Top)。
-        flu[d_Ord3(ic, nyp, kc, nzp, nxp)].v = v_bc;
-    }
-}
-*/
 
 __global__ void bc_presure(fluid* flu)
 {
@@ -1069,20 +1035,25 @@ __global__ void BackwardSubstitution(int m, int n, double* fj, double* arrmn) {
 
 // ��������ֻ���� GPU ����������
 void InverseTridiagonalDevice(int m, int n, double* aj, double* bj, double* cj, double* fj) {
-
+	// �����Ż�
 	double* d_vecm, * d_arrmn;
+
+	// �豸���ڴ���䣨������ֲ��м�����
 	cudaMalloc((void**)&d_vecm, m * sizeof(double));
 	cudaMalloc((void**)&d_arrmn, m * n * sizeof(double));
 
 	int threadsPerBlock = 1024;
 	int blocksPerGrid = (m + threadsPerBlock - 1) / threadsPerBlock;
 
+	// ǰ����ȥ
 	ForwardElimination << <blocksPerGrid, threadsPerBlock >> > (m, n, aj, bj, cj, fj, d_vecm, d_arrmn);
 	cudaDeviceSynchronize();
 
+	// ����ش�
 	BackwardSubstitution << <blocksPerGrid, threadsPerBlock >> > (m, n, fj, d_arrmn);
 	cudaDeviceSynchronize();
-	
+
+	// �����豸���ڴ�
 	cudaFree(d_vecm);
 	cudaFree(d_arrmn);
 }
@@ -1262,6 +1233,8 @@ void calcuate()
 	start = clock();
 	for (int t = 0; t <= timemax; t++)
 	{
+        // 计算当前物理时间，用于传递给含时边界
+		double current_time = t * dt;
 
 		for (int ns = 0; ns < 3; ns++)
 		{
@@ -1297,7 +1270,7 @@ void calcuate()
 			what_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device);
 			vhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device);
 
-			bc_velocity << < nzp, nxp >> > (flu);
+			bc_velocity << < nzp, nxp >> > (flu, current_time);
 
 			/*吹吸边界条件*/
             /*
@@ -1331,13 +1304,7 @@ void calcuate()
 
 			bc_presure << < nzp, nxp >> > (flu); cudaDeviceSynchronize();
 
-			bc_velocity << < nzp, nxp >> > (flu);
-
-			/*吹吸边界条件*/
-            /*
-            bc_velocity << < nzp, nxp >> > (flu, current_time);
-			*/
-
+			bc_velocity << < nzp, nxp >> > (flu, current_time);
 
 			/*update*/
 
@@ -1383,6 +1350,21 @@ void calcuate()
 			//output_velocity(flu, flu_host, t);
 			output_restart(flu, flu_host, var);
 		}
+
+		// ===== 修改：一气呵成的工作流 =====
+		// 仅在 25000 步稳定后，至 30000 步期间，每 10 步采样一次 (共获取 500 个样本)
+		if (t > 25000 && t <= 30000 && t % 10 == 0)
+		{
+			accumulate_tau_w(flu);  // 调用我们新写的极速 GPU 累加器
+		}
+
+		// 在第 30000 步彻底结束时，一键输出结果
+		if (t == 30000)
+		{
+			output_fig5(); 
+		}
+		// ==================================
+
 #endif
 	}
 

@@ -22,23 +22,18 @@ void init_mesh_para()
 	memset(dydir, 0, (static_cast<size_t>(nyp) + 1) * sizeof(dyDir));
 	memset(rk, 0, 3 * sizeof(RK));
 
-	/*define the dy of the no-uniform mesh both up and bottom*/
-	double tstr = sin(0.5 * PI);
-	for (int j = 1; j <= nyp / 2; j++)
+	/* 单侧双曲正切(tanh)非均匀网格划分：仅在底部(y=0)极度加密 */
+	double gamma_mesh = 3.5; 
+
+	for (int j = 1; j <= nyp; j++)
 	{
-		double xi = 2.0 * (double(j) - 1.0) / nyc - 1.0;
-		double y0 = sin(0.5 * PI * xi) + 1.0;
-		dydir[j].yp = 0.5 * y0 * ylength;
-		dydir[nyp + 1 - j].yp = ylength - dydir[j].yp;
+		double xi = (double(j) - 1.0) / nyc; 
+		dydir[j].yp = ylength * (1.0 + tanh(gamma_mesh * (xi - 1.0)) / tanh(gamma_mesh));
 	}
 	dydir[1].yp = 0.0;
 	dydir[nyp].yp = ylength;
-	if (nyp % 2 == 1)
-	{
-		dydir[nyp / 2 + 1].yp = 0.5 * ylength;
-	}
 
-	/*define para related to y-dir*/
+	/*define para related to y-dir (保留原始计算逻辑，自适应不对称)*/
 	for (int j = 1; j <= nyc; j++)
 	{
 		dydir[j].yc = 0.5 * (dydir[j].yp + dydir[j + 1].yp);
@@ -121,9 +116,6 @@ void init_mesh_para()
 		ypara_host[j].yinterpCoe = dydir[j].dyp / (dydir[j].dyp + dydir[j - 1].dyp);
 	}
 
-	//constexpr double gamma[3] = { 8.0 / 15.0 * dt , 5.0 / 12.0 * dt  ,3.0 / 4.0 * dt };//��Ҫ��gpu�϶���
-	//constexpr double theta[3] = { 0.0 * dt        ,-17.0 / 60.0 * dt ,2.0 / 15.0 * dt };
-	//constexpr double alpha[3] = { 8.0 / 15.0 * dt ,2.0 / 15.0 * dt   ,1.0 / 3.0 * dt };
 	rk[0].alpha = 8.0 / 15.0 * dt;
 	rk[1].alpha = 2.0 / 15.0 * dt;
 	rk[2].alpha = 1.0 / 3.0 * dt;
@@ -136,67 +128,62 @@ void init_mesh_para()
 	rk[1].theta = -17.0 / 60.0 * dt;
 	rk[2].theta = -5.0 / 12.0 * dt;
 
-
 	CHECK_CUDA(cudaMalloc((void**)&ypara_device, (nyp + 1) * sizeof(Ypara)));
 	CHECK_CUDA(cudaMalloc((void**)&dydir_device, (nyp + 1) * sizeof(dyDir)));
 	CHECK_CUDA(cudaMalloc((void**)&rk_device, 3 * sizeof(RK)));
 	cudaMemcpy(ypara_device, ypara_host, (nyp + 1) * sizeof(Ypara), cudaMemcpyHostToDevice);
 	cudaMemcpy(dydir_device, dydir, (nyp + 1) * sizeof(dyDir), cudaMemcpyHostToDevice);
 	cudaMemcpy(rk_device, rk, 3 * sizeof(RK), cudaMemcpyHostToDevice);
-
-	//rk[0].beta = ;
-	//rk[1].beta = ;
-	//rk[2].beta = ;
 }
 
 void init_fluid(fluid* flu)
 {
-
 	int ic, jc, kc;
-
 	double height = 0.5 * ylength;
 
-	double Re = ubulk * height / nu;
+	// 保留你原本严格验证过的雷诺数计算逻辑，但当 ubulk = 0 时规避 NaN 运算
+	double Re = 1.0; 
+	if (abs(ubulk) > 1e-12) {
+		Re = ubulk * height / nu;
+	}
 	double Retau = 0.1538 * pow(Re, 0.887741);
 	double utau = Retau * nu / height;
 
-	//int ic = blockIdx.x * blockDim.x + threadIdx.x;
-	//int jc = blockIdx.y * blockDim.y + threadIdx.y;
-	//int kc = blockIdx.z * blockDim.z + threadIdx.z;
-
 	double uzmean[nyp] = { 0.0 };
 	double uxmean = 0.0;
+	
 	double wx = 2.0 * PI / 500.0;
 	double wz = 2.0 * PI / 200.0;
 
-	double xlength_plus = xlength * utau / nu;
-	double zlength_plus = zlength * utau / nu;
+	if (abs(ubulk) > 1e-12) {
+		double xlength_plus = xlength * utau / nu;
+		double zlength_plus = zlength * utau / nu;
 
-	int m1 = (int)(xlength_plus * wx / (2.0 * PI)) + 1;
-	int m2 = (int)(zlength_plus * wz / (2.0 * PI)) + 1;
+		int m1 = (int)(xlength_plus * wx / (2.0 * PI)) + 1;
+		int m2 = (int)(zlength_plus * wz / (2.0 * PI)) + 1;
 
-	wx = m1 * 2.0 * PI / xlength_plus;
-	wz = m2 * 2.0 * PI / zlength_plus;
+		wx = m1 * 2.0 * PI / xlength_plus;
+		wz = m2 * 2.0 * PI / zlength_plus;
+	}
 
-	std::random_device rd;  // ��ȡ���������
-	std::mt19937 gen(rd());  // ʹ��÷ɭ��ת�㷨�����������
-	std::uniform_real_distribution<double> dis(0.9, 1.1);  // ���ȷֲ���ΧΪ[0.9, 1.1]
+	std::random_device rd;  
+	std::mt19937 gen(rd());  
+	std::uniform_real_distribution<double> dis(0.9, 1.1);  
+
 	for (jc = 1; jc < nyp; jc++)
 	{
 		uzmean[jc] = 0.0;
-		double yct = height - abs(height - dydir[jc].yc);
+		double yct = dydir[jc].yc;
 		double ybar = yct / height;
-		double yplus = utau * yct / nu;
+		if (ybar > 1.0) ybar = 2.0 - ybar;
+
 		for (kc = 0; kc < nzp; kc++)
 		{
 			double zp = kc * dz + dz * 0.5;
 			double zplus = utau * zp / nu;
 			for (ic = 0; ic < nxp; ic++)
 			{
-				double random_number = dis(gen);// ���������
-				//double random_number = 1.0;
-
-
+				double random_number = dis(gen);
 				double xp = ic * dx + dx * 0.5;
 				double xplus = utau * xp / nu;
 
@@ -204,50 +191,49 @@ void init_fluid(fluid* flu)
 				flu[Ord3(ic, jc, kc, nzp, nxp)].v = 0.0;
 				flu[Ord3(ic, jc, kc, nzp, nxp)].w = ubulk * ybar * exp(-4.5 * ybar * ybar) * sin(wx * xplus) * random_number;
 
-				//flu[Ord3(ic, jc, kc, nzp, nxp)].u = 0.0052 * ubulk * yplus * exp(-yplus * yplus / 1800.0) * cos(wz * zplus) * random_number + 3.0 * ubulk * (ybar - 0.5 * ybar * ybar);
-				//flu[Ord3(ic, jc, kc, nzp, nxp)].v = 0.0;
-				//flu[Ord3(ic, jc, kc, nzp, nxp)].w = 0.0050 * ubulk * yplus * exp(-yplus * yplus / 1800.0) * sin(wx * xplus) * random_number;
-
-				//flu[Ord3(ic, jc, kc, nzp, nxp)].uold = 0.0052 * ubulk * yplus * exp(-yplus * yplus / 1800.0) * cos(wz * zplus) + 3.0 * ubulk * (ybar - 0.5 * ybar * ybar);
-				//var[Ord3(ic, jc, kc, nzp, nxp)].vold = 0.0;
-				//flu[Ord3(ic, jc, kc, nzp, nxp)].wold = 0.0050 * ubulk * yplus * exp(-yplus * yplus / 1800.0) * sin(wx * xplus);
 				uzmean[jc] = uzmean[jc] + flu[Ord3(ic, jc, kc, nzp, nxp)].w;
 				uxmean = uxmean + flu[Ord3(ic, jc, kc, nzp, nxp)].u * dydir[jc].dyp;
 			}
 		}
 		uzmean[jc] = uzmean[jc] / (nxzc);
 	}
-	uxmean = uxmean / (nxzc * ylength);
+	
+	if (abs(ubulk) > 1e-12) {
+		uxmean = uxmean / (nxzc * ylength);
+	}
 
 	for (jc = 1; jc < nyp; jc++)
 	{
 		for (kc = 0; kc < nzp; kc++)
 			for (ic = 0; ic < nxp; ic++)
 			{
-				flu[Ord3(ic, jc, kc, nzp, nxp)].u = flu[Ord3(ic, jc, kc, nzp, nxp)].u * ubulk / uxmean - uCRF;
-				flu[Ord3(ic, jc, kc, nzp, nxp)].w = flu[Ord3(ic, jc, kc, nzp, nxp)].w - uzmean[jc];
-
-				//var[d_Ord3(ic, jc, kc, nzp, nxp)].uold = flu[d_Ord3(ic, jc, kc, nzp, nxp)].u;
-				//var[d_Ord3(ic, jc, kc, nzp, nxp)].wold = flu[d_Ord3(ic, jc, kc, nzp, nxp)].w;
+				if (abs(ubulk) < 1e-12) {
+					// 静水直接赋 0，不破坏原逻辑
+					flu[Ord3(ic, jc, kc, nzp, nxp)].u = 0.0;
+					flu[Ord3(ic, jc, kc, nzp, nxp)].v = 0.0;
+					flu[Ord3(ic, jc, kc, nzp, nxp)].w = 0.0;
+				} 
+				else {
+					// 保留你原本严格验证过的归一化逻辑
+					flu[Ord3(ic, jc, kc, nzp, nxp)].u = flu[Ord3(ic, jc, kc, nzp, nxp)].u * ubulk / uxmean - uCRF;
+					flu[Ord3(ic, jc, kc, nzp, nxp)].w = flu[Ord3(ic, jc, kc, nzp, nxp)].w - uzmean[jc];
+				}
 			}
 	}
-	
-	/*bc init*/
+
+	/* 边界初始化：顶部滑移，底部 Stokes */
 	for (kc = 0; kc < nzp; kc++)
 		for (ic = 0; ic < nxp; ic++)
 		{
-			flu[Ord3(ic, nyp, kc, nzp, nxp)].u = -2.0 * uCRF - flu[Ord3(ic, nyc, kc, nzp, nxp)].u;
-			flu[Ord3(ic, 0, kc, nzp, nxp)].u = -2.0 * uCRF - flu[Ord3(ic, 1, kc, nzp, nxp)].u;
+			flu[Ord3(ic, nyp, kc, nzp, nxp)].u = flu[Ord3(ic, nyc, kc, nzp, nxp)].u;
+			flu[Ord3(ic, nyp, kc, nzp, nxp)].w = flu[Ord3(ic, nyc, kc, nzp, nxp)].w;
+			flu[Ord3(ic, nyp, kc, nzp, nxp)].v = 0.0;  
 
-			flu[Ord3(ic, nyp, kc, nzp, nxp)].w = -flu[Ord3(ic, nyc, kc, nzp, nxp)].w;
+			double initial_u_wall = U_osc * cos(0.0) - uCRF;
+			flu[Ord3(ic, 0, kc, nzp, nxp)].u = 2.0 * initial_u_wall - flu[Ord3(ic, 1, kc, nzp, nxp)].u;
 			flu[Ord3(ic, 0, kc, nzp, nxp)].w = -flu[Ord3(ic, 1, kc, nzp, nxp)].w;
-
-			flu[Ord3(ic, nyp, kc, nzp, nxp)].v = 0.0;  //nyp上壁面
-			// flu[Ord3(ic, 0, kc, nzp, nxp)].v = 0.0;    //虚拟点
-			flu[Ord3(ic, 1, kc, nzp, nxp)].v = 0.0;   //1是下壁面
-
+			flu[Ord3(ic, 1, kc, nzp, nxp)].v = 0.0;   
 		}
-
 
 	for (jc = 0; jc <= nyp; jc++)
 		for (kc = 0; kc < nzp; kc++)
@@ -256,8 +242,8 @@ void init_fluid(fluid* flu)
 				flu[Ord3(ic, jc, kc, nzp, nxp)].p = 0.0;
 			}
 
-	FILE* fp = NULL;//�ļ�ָ��
-	char filename[100];//�ļ���
+	FILE* fp = NULL;
+	char filename[100];
 	char flu_name[100];
 
 	sprintf_s(flu_name, "mesh.dat");
@@ -265,18 +251,9 @@ void init_fluid(fluid* flu)
 	strcat_s(filename, flu_name);
 	fopen_s(&fp, filename, "w+");
 
-	for (ic = 0; ic < nxp; ic = ic + xskip)
-	{
-		fprintf(fp, "%e\n", ic * dx);
-	}
-	for (jc = 0; jc <= nyp; jc = jc + yskip)
-	{
-		fprintf(fp, "%e\n", dydir[jc].yc);
-	}
-	for (kc = 0; kc < nzp; kc = kc + zskip)
-	{
-		fprintf(fp, "%e\n", kc * dz);
-	}
+	for (ic = 0; ic < nxp; ic = ic + xskip) { fprintf(fp, "%e\n", ic * dx); }
+	for (jc = 0; jc <= nyp; jc = jc + yskip) { fprintf(fp, "%e\n", dydir[jc].yc); }
+	for (kc = 0; kc < nzp; kc = kc + zskip) { fprintf(fp, "%e\n", kc * dz); }
 
 	fclose(fp);
 }
