@@ -3,18 +3,23 @@ clear; clc; close all;
 %% 1. 基础配置 (物理与路径参数)
 %% ========================================================================
 % --- 路径 ---
-dns_dir = 'E:\file\zd\zero_flow\Re_delta=1';          % 修改为你实际存放数据的目录
+dns_dir = 'E:\file\zd\zero_flow\Re_delta=1000';          % 修改为你实际存放数据的目录
 fname_stat   = 'stat.dat';
 fname_mesh   = 'mesh.dat';
 % --- 网格输出参数 (对应你 C++ 里的 xskip, yskip, zskip) ---
 % 如果 xskip=2, 那么 x_length = nxp/2 = 384/2 = 192
 x_length = 384 / 2;      
-y_length = 191 + 1;      
+% y_length = 191 + 1;    
+% y_length = 257 + 1; 
+% y_length = 383 + 1; 
+y_length = 513 + 1; 
 z_length = 256 / 2;   
 % --- 物理与震荡参数 (务必与 parameters.h 保持一致) ---
 U_osc = 1.0;
 omega = 2.0 * pi;
-Re_delta = 1.0;                 % 你当前跑的目标 Re_delta
+
+Re_delta = 1000.0;                 % 你当前跑的目标 Re_delta
+
 nu = (2.0 * U_osc^2) / (omega * Re_delta^2);
 delta = sqrt(2.0 * nu / omega); % Stokes 穿透深度
 dt = 0.0002;            % 时间步长
@@ -55,6 +60,13 @@ for i = 1:num_steps
     u_mean_transient(:, i) = stat(base_idx + 4, :)';
 end
 fprintf('成功提取 %d 个快照的瞬态数据！\n', num_steps);
+
+% 统计落在 1 个 delta 物理厚度内的网格点数量
+points_in_delta = sum(yc <= delta);
+fprintf('>>> 当前 Re_delta = %g, 穿透层 (1 delta) 内分配了 %d 个网格。\n', Re_delta, points_in_delta);
+
+% 检查第一层网格高度比
+fprintf('>>> 第一层网格高度 y1 = %.4f delta (安全阈值 < 0.05)。\n', yc(1)/delta);
 %% ========================================================================
 %% 4. 画图对比：双色系演化与解析解比对
 %% ========================================================================
@@ -63,10 +75,15 @@ hold on; box on; grid on;
 % 计算一个震荡周期包含多少个输出快照
 snaps_per_period = round((2*pi/omega) / (output_interval * dt));
 start_snap = max(1, num_steps - snaps_per_period + 1);
+
 % 智能抽样画图
-max_plot_lines = 4; 
+
+max_plot_lines = 8; 
+
 plot_step = max(1, round(snaps_per_period / max_plot_lines));
-plot_indices = start_snap : plot_step : num_steps;
+% plot_indices = start_snap : plot_step : num_steps;
+plot_indices = 201 : plot_step : 700;
+
 % === 核心修改：生成两组不同的渐变色 ===
 % DNS 用 winter 冷色调 (蓝到绿)，解析解用 autumn 暖色调 (红到黄)
 colors_dns = winter(length(plot_indices) + 2); 
@@ -95,9 +112,9 @@ plot(NaN, NaN, '-', 'Color', colors_ana(round(end/2), :), 'LineWidth', 2, ...
 xlabel('无量纲速度 {\it u} / {\it U}_{osc}', 'FontSize', 14);
 ylabel('无量纲高度 {\it y} / \delta', 'FontSize', 14);
 title(sprintf('Stokes 第二类流动相位验证 (Re_\\delta = %g)', Re_delta), 'FontSize', 16);
-yline(delta, 'k--', 'LineWidth', 1.5, 'Label', '\delta (Stokes 穿透深度)', ...
+yline(1, 'k--', 'LineWidth', 1.5, 'Label', '\delta (Stokes 穿透深度)', ...
     'LabelHorizontalAlignment', 'left', 'FontSize', 12);
-ylim([0, 20 * delta]); 
+ylim([0, 3]); 
 xlim([- 1.2, 1.2]);
 legend('Location', 'bestoutside', 'NumColumns', 1);
 set(gca, 'FontSize', 12, 'LineWidth', 1.2);
