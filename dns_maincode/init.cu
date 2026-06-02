@@ -23,8 +23,8 @@ void init_mesh_para()
 	memset(rk, 0, 3 * sizeof(RK));
 
 	/* 单侧双曲正切(tanh)非均匀网格划分：仅在底部(y=0)极度加密 */
-	double gamma_mesh = 3.5; 
-
+	// double gamma_mesh = 3.5; 
+	double gamma_mesh = 4.6; 
 	for (int j = 1; j <= nyp; j++)
 	{
 		double xi = (double(j) - 1.0) / nyc; 
@@ -139,8 +139,8 @@ void init_mesh_para()
 void init_fluid(fluid* flu)
 {
 	int ic, jc, kc;
-	double height = 0.5 * ylength;
-
+	// double height = 0.5 * ylength;//全槽道
+	double height = ylength;//半槽道
 	// 保留你原本严格验证过的雷诺数计算逻辑，但当 ubulk = 0 时规避 NaN 运算
 	double Re = 1.0; 
 	if (abs(ubulk) > 1e-12) {
@@ -175,7 +175,7 @@ void init_fluid(fluid* flu)
 		uzmean[jc] = 0.0;
 		double yct = dydir[jc].yc;
 		double ybar = yct / height;
-		if (ybar > 1.0) ybar = 2.0 - ybar;
+		// if (ybar > 1.0) ybar = 2.0 - ybar;//全槽道
 
 		for (kc = 0; kc < nzp; kc++)
 		{
@@ -198,27 +198,50 @@ void init_fluid(fluid* flu)
 		uzmean[jc] = uzmean[jc] / (nxzc);
 	}
 	
-	if (abs(ubulk) > 1e-12) {
+  if (abs(ubulk) > 1e-12) {
 		uxmean = uxmean / (nxzc * ylength);
 	}
 
+	std::uniform_real_distribution<double> noise(-1.0, 1.0);
+
+
+	double amp = 0.05 * U_osc; 
+
+	double Lx = nxp * dx;
+	double Lz = nzp * dz;
+	double kz = 4.0 * PI / Lz;
+	double kx = 2.0 * PI / Lx;
+
+
+	double local_nu = (2.0 * U_osc * U_osc) / (omega * Re_delta * Re_delta);
+	double local_delta = sqrt(2.0 * local_nu / omega);
+
 	for (jc = 1; jc < nyp; jc++)
 	{
+
+		double y = dydir[jc].yc;
+		double y_star = y / local_delta;
+
+		double f_y = 1.85 * (y_star * y_star) * exp(-y_star);
+
 		for (kc = 0; kc < nzp; kc++)
+		{
+			double zp = kc * dz + 0.5 * dz;
 			for (ic = 0; ic < nxp; ic++)
 			{
+				double xp = ic * dx + 0.5 * dx;
+
 				if (abs(ubulk) < 1e-12) {
-					// 静水直接赋 0，不破坏原逻辑
-					flu[Ord3(ic, jc, kc, nzp, nxp)].u = 0.0;
-					flu[Ord3(ic, jc, kc, nzp, nxp)].v = 0.0;
-					flu[Ord3(ic, jc, kc, nzp, nxp)].w = 0.0;
-				} 
+					flu[Ord3(ic, jc, kc, nzp, nxp)].u = amp * f_y * sin(kz * zp) * cos(kx * xp);
+					flu[Ord3(ic, jc, kc, nzp, nxp)].v = amp * f_y * 0.1 * cos(kz * zp) * sin(kx * xp);
+					flu[Ord3(ic, jc, kc, nzp, nxp)].w = amp * f_y * sin(kz * zp) * sin(kx * xp);
+				}
 				else {
-					// 保留你原本严格验证过的归一化逻辑
 					flu[Ord3(ic, jc, kc, nzp, nxp)].u = flu[Ord3(ic, jc, kc, nzp, nxp)].u * ubulk / uxmean - uCRF;
 					flu[Ord3(ic, jc, kc, nzp, nxp)].w = flu[Ord3(ic, jc, kc, nzp, nxp)].w - uzmean[jc];
 				}
 			}
+		}
 	}
 
 	/* 边界初始化：顶部滑移，底部 Stokes */

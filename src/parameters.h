@@ -114,12 +114,18 @@ constexpr double Re_delta = 100.0;     // 目标震荡雷诺数 (控制穿透深
 #endif
 
 constexpr double xlength = 6.283185307;
-constexpr double ylength = 2.0;
+// constexpr double ylength = 2.0;//全槽道
+constexpr double ylength = 1.0;//半槽道
 constexpr double zlength = 3.141592654;
 
-constexpr int nxp = 640;
-constexpr int nyp = 511;
-constexpr int nzp = 640;
+// constexpr int nxp = 640;
+// constexpr int nyp = 511;
+// constexpr int nzp = 640;
+
+constexpr int nxp = 364;
+// constexpr int nyp = 191;
+constexpr int nyp = 257;
+constexpr int nzp = 256;
 
 constexpr int nxc = nxp - 1;
 constexpr int nyc = nyp - 1;
