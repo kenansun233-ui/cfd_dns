@@ -342,7 +342,7 @@ __global__ void uhat_coe(process_variables* var, Ypara* ypara, int ns, double* a
 		d[i * nyc + j] = var[d_Ord3(i, (j + 1), k, nzp, nxp)].rhsx;
 
         if (j == 0) {
-			d[i * nyc + j] += (0.5 * rk[ns].alpha * nu) * ypara[1].am2cForCN * u_wall_next;
+			d[i * nyc + j] += ( rk[ns].alpha * nu) * ypara[1].am2cForCN * u_wall_next;
 		}
 		
 	}
@@ -1320,7 +1320,7 @@ void calcuate()
 
 			CHECK_CUDA(cudaMemcpy(&s3tot_host, s3tot, sizeof(double), cudaMemcpyDeviceToHost));
 			prgradaver += nu * (s3tot_host) / nxzc / ylength * rk[ns].alpha / dt;
-			
+
 			t_stage_start = t_next;
 
 		}

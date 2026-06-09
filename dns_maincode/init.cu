@@ -204,45 +204,97 @@ void init_fluid(fluid* flu)
 
 	std::uniform_real_distribution<double> noise(-1.0, 1.0);
 
+	/* Stokes震荡初始条件 */
+    double amp = 0.05 * U_osc; 
 
-	double amp = 0.05 * U_osc; 
+    double Lx = nxp * dx;
+    double Lz = nzp * dz;
 
-	double Lx = nxp * dx;
-	double Lz = nzp * dz;
-	double kz = 4.0 * PI / Lz;
-	double kx = 2.0 * PI / Lx;
+    // 计算局部的真实物理穿透深度 delta
+    double local_nu = (2.0 * U_osc * U_osc) / (omega * Re_delta * Re_delta);
+    double local_delta = sqrt(2.0 * local_nu / omega);
 
+    // =========================================================
+    // 模态 1：宏观流向条带扰动 (针对宏观水槽与定来流)
+    // =========================================================
+    double kx1 = 1.0 * 2.0 * PI / Lx;
+    double kz1 = 4.0 * 2.0 * PI / Lz;
+    double K2_1 = kx1 * kx1 + kz1 * kz1;
 
-	double local_nu = (2.0 * U_osc * U_osc) / (omega * Re_delta * Re_delta);
-	double local_delta = sqrt(2.0 * local_nu / omega);
+    // =========================================================
+    // 模态 2：微观靶向高频扰动 (针对斯托克斯震荡底壁)
+    // 强制锁定最不稳定物理无量纲波数 (alpha*delta ≈ 0.5, beta*delta ≈ 1.0)
+    // =========================================================
+    double target_alpha = 0.5;
+    double target_beta  = 1.0;
+    // 自动反推在这个巨大的 Lx 中，应该塞入多少个微观发卡涡
+    int n_x2 = max(1, (int)round((target_alpha / local_delta) * Lx / (2.0 * PI)));
+    int n_z2 = max(1, (int)round((target_beta  / local_delta) * Lz / (2.0 * PI)));
+    double kx2 = n_x2 * 2.0 * PI / Lx;
+    double kz2 = n_z2 * 2.0 * PI / Lz;
+    double K2_2 = kx2 * kx2 + kz2 * kz2;
 
-	for (jc = 1; jc < nyp; jc++)
-	{
+    for (jc = 1; jc < nyp; jc++)
+    {
+        double y = dydir[jc].yc;
+        double y_star = y / local_delta;
 
-		double y = dydir[jc].yc;
-		double y_star = y / local_delta;
+        // 构造满足法向边界条件的形函数 V(y) 和它的严格一阶导数 dV/dy
+        double V_y = amp * (y_star * y_star) * exp(-y_star);
+        double dV_dy = (amp / local_delta) * (2.0 * y_star - y_star * y_star) * exp(-y_star);
 
-		double f_y = 1.85 * (y_star * y_star) * exp(-y_star);
+        for (kc = 0; kc < nzp; kc++)
+        {
+            double zp = kc * dz + 0.5 * dz;
+            for (ic = 0; ic < nxp; ic++)
+            {
+                double xp = ic * dx + 0.5 * dx;
 
-		for (kc = 0; kc < nzp; kc++)
-		{
-			double zp = kc * dz + 0.5 * dz;
-			for (ic = 0; ic < nxp; ic++)
-			{
-				double xp = ic * dx + 0.5 * dx;
+                // -----------------------------------------------------
+                // 生成绝对无散度 (Divergence-Free) 的三维扰动场
+                // 严谨满足： du/dx + dv/dy + dw/dz = 0
+                // -----------------------------------------------------
+                
+                // 1. 宏观扰动成分计算
+                double u_p1 = -dV_dy * (kx1 / K2_1) * sin(kx1 * xp) * sin(kz1 * zp);
+                double v_p1 =  V_y  * cos(kx1 * xp) * sin(kz1 * zp);
+                double w_p1 =  dV_dy * (kz1 / K2_1) * cos(kx1 * xp) * cos(kz1 * zp);
 
-				if (abs(ubulk) < 1e-12) {
-					flu[Ord3(ic, jc, kc, nzp, nxp)].u = amp * f_y * sin(kz * zp) * cos(kx * xp);
-					flu[Ord3(ic, jc, kc, nzp, nxp)].v = amp * f_y * 0.1 * cos(kz * zp) * sin(kx * xp);
-					flu[Ord3(ic, jc, kc, nzp, nxp)].w = amp * f_y * sin(kz * zp) * sin(kx * xp);
-				}
-				else {
-					flu[Ord3(ic, jc, kc, nzp, nxp)].u = flu[Ord3(ic, jc, kc, nzp, nxp)].u * ubulk / uxmean - uCRF;
-					flu[Ord3(ic, jc, kc, nzp, nxp)].w = flu[Ord3(ic, jc, kc, nzp, nxp)].w - uzmean[jc];
-				}
-			}
-		}
-	}
+                // 2. 微观靶向扰动成分计算
+                double u_p2 = -dV_dy * (kx2 / K2_2) * sin(kx2 * xp) * sin(kz2 * zp);
+                double v_p2 =  V_y  * cos(kx2 * xp) * sin(kz2 * zp);
+                double w_p2 =  dV_dy * (kz2 / K2_2) * cos(kx2 * xp) * cos(kz2 * zp);
+
+                // 3. 组合双频总扰动
+                double u_pert = u_p1 + u_p2;
+                double v_pert = v_p1 + v_p2;
+                double w_pert = w_p1 + w_p2;
+
+                // -----------------------------------------------------
+                // 与基流合并逻辑 (完美兼容纯震荡与混合来流)
+                // -----------------------------------------------------
+                int id = Ord3(ic, jc, kc, nzp, nxp);
+
+                if (abs(ubulk) < 1e-12) {
+                    // 纯震荡流情况：直接赋予扰动
+                    flu[id].u = u_pert;
+                    flu[id].v = v_pert;
+                    flu[id].w = w_pert;
+                }
+                else {
+                    // 定来流情况：先提取并修正基流，再【叠加】扰动！
+                    double base_u = flu[id].u * ubulk / uxmean - uCRF;
+                    double base_w = flu[id].w - uzmean[jc];
+
+                    flu[id].u = base_u + u_pert; // 必须叠加，否则扰动为0
+                    flu[id].v = v_pert;          // v 方向无定常基流
+                    flu[id].w = base_w + w_pert;
+                }
+            }
+        }
+    }
+	/* Stokes震荡初始条件 */
+
 
 	/* 边界初始化：顶部滑移，底部 Stokes */
 	for (kc = 0; kc < nzp; kc++)
