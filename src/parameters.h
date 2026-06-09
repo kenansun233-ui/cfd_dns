@@ -99,7 +99,7 @@ constexpr double PI = 3.14159265358979323846264338327950288;
 // --- Stokes 震荡底壁控制参数 ---
 constexpr double U_osc = 1.0;          // 震荡速度振幅
 constexpr double omega = 2.0 * PI;     // 震荡圆频率 (周期 T = 1.0)
-constexpr double Re_delta = 100.0;     // 目标震荡雷诺数 (控制穿透深度和粘度)
+constexpr double Re_delta = 700.0;     // 目标震荡雷诺数 (控制穿透深度和粘度)
 
 #ifdef ZERO_CROSS_FLOW
 	// 阶段一：纯震荡层流验证
@@ -113,19 +113,25 @@ constexpr double Re_delta = 100.0;     // 目标震荡雷诺数 (控制穿透深
 	constexpr double nu = 3.37668E-5;  
 #endif
 
-constexpr double xlength = 6.283185307;
+// constexpr double xlength = 6.283185307;
+constexpr double xlength = 1.5707963265;
 // constexpr double ylength = 2.0;//全槽道
 constexpr double ylength = 1.0;//半槽道
-constexpr double zlength = 3.141592654;
+// constexpr double zlength = 3.141592654;
+constexpr double zlength = 0.7853981634;
 
 // constexpr int nxp = 640;
 // constexpr int nyp = 511;
 // constexpr int nzp = 640;
 
-constexpr int nxp = 364;
-// constexpr int nyp = 191;
-constexpr int nyp = 257;
-constexpr int nzp = 256;
+// constexpr int nxp = 364;
+// // constexpr int nyp = 191;
+// constexpr int nyp = 257;
+// constexpr int nzp = 256;
+
+constexpr int nxp = 256;
+constexpr int nyp = 385;
+constexpr int nzp = 128;
 
 constexpr int nxc = nxp - 1;
 constexpr int nyc = nyp - 1;
@@ -170,7 +176,7 @@ constexpr double interpcoe4 = -1.0 / 16.0;
 
 constexpr double zero = 0.0;
 
-constexpr double dt = 0.0002;
+constexpr double dt = 0.001;
 
 #ifdef Restart
 constexpr int timemax = 20000;

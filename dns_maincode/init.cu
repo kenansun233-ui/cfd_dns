@@ -24,7 +24,7 @@ void init_mesh_para()
 
 	/* 单侧双曲正切(tanh)非均匀网格划分：仅在底部(y=0)极度加密 */
 	// double gamma_mesh = 3.5; 
-	double gamma_mesh = 4.6; 
+	double gamma_mesh = 4.5; 
 	for (int j = 1; j <= nyp; j++)
 	{
 		double xi = (double(j) - 1.0) / nyc; 

@@ -330,7 +330,7 @@ __global__ void correct_rhsx(fluid* flu, process_variables* var, dyDir* dydir, Y
 
 
 /*uhat*/
-__global__ void uhat_coe(process_variables* var, Ypara* ypara, int ns, double* a, double* b, double* c, double* d, int k, RK* rk)
+__global__ void uhat_coe(process_variables* var, Ypara* ypara, int ns, double* a, double* b, double* c, double* d, int k, RK* rk, double u_wall_next)
 {
 	int i = threadIdx.x;
 	int j = blockIdx.x;
@@ -340,10 +340,15 @@ __global__ void uhat_coe(process_variables* var, Ypara* ypara, int ns, double* a
 		b[i * nyc + j] = 1.0 - (0.5 * rk[ns].alpha * nu) * ypara[(j + 1)].ac2cForCN;
 		c[i * nyc + j] = -(0.5 * rk[ns].alpha * nu) * ypara[(j + 1)].ap2cForCN;
 		d[i * nyc + j] = var[d_Ord3(i, (j + 1), k, nzp, nxp)].rhsx;
+
+        if (j == 0) {
+			d[i * nyc + j] += (0.5 * rk[ns].alpha * nu) * ypara[1].am2cForCN * u_wall_next;
+		}
+		
 	}
 }
 
-void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk)
+void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk, double u_wall_next)
 {
 	//cusparseHandle_t handle;
 	//CHECK_CUSPARSE(cusparseCreate(&handle));
@@ -354,7 +359,7 @@ void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, doubl
 	{
 		//size_t bufferSize;
 		//void* buffer = nullptr;
-		uhat_coe << <nyc, nxp >> > (var, ypara, ns, a, b, c, d, k, rk);
+		uhat_coe << <nyc, nxp >> > (var, ypara, ns, a, b, c, d, k, rk, u_wall_next);
 
 		//if (ns == 1)
 		//{
@@ -365,7 +370,6 @@ void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, doubl
 		//		std::cout << temp[i + 2*nxp] << std::endl;
 		//	}		
 		//}
-
 		//CHECK_CUSPARSE(cusparseDgtsv2StridedBatch_bufferSizeExt(handle, nyc, a, b, c, d, nxp, nyc, &bufferSize));
 		//CHECK_CUDA(cudaMalloc(&buffer, bufferSize));
 		//CHECK_CUSPARSE(cusparseDgtsv2StridedBatch(handle, nyc, a, b, c, d, nxp, nyc, buffer));
@@ -1234,11 +1238,15 @@ void calcuate()
 	for (int t = 0; t <= timemax; t++)
 	{
         // 计算当前物理时间，用于传递给含时边界
-		double current_time = t * dt;
+		double t_stage_start = t * dt;
 
 		for (int ns = 0; ns < 3; ns++)
 		{
 			CHECK_CUDA(cudaMemcpy(s3tot, &zero, sizeof(double), cudaMemcpyHostToDevice));
+            /*修改时间补偿*/
+            double t_next = t_stage_start + rk[ns].alpha;
+			double u_wall_next = U_osc * cos(omega * t_next) - uCRF;
+			/*修改时间补偿*/
 
 			Update_VelInterp_uvw << < gridDim, blockDim >> > (flu, uxhx, uyhx, uzhx, uxhz, uyhz, uzhz);  //flu ��Ҫ��gpu�϶���
 			rhsx << < gridDim, blockDim >> > (flu, var, dydir_device, ypara_device, uxhx, uyhx, uzhx, uxhz, uyhz, uzhz, ns, s3tot, rk_device);
@@ -1266,11 +1274,13 @@ void calcuate()
 			//	CHECK_CUDA(cudaFree(buffer));
 			//}
 
-			uhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device);
+            /*修改真实速度*/
+			uhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device, u_wall_next);
+			/*修改真实速度*/
 			what_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device);
 			vhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device);
 
-			bc_velocity << < nzp, nxp >> > (flu, current_time);
+			bc_velocity << < nzp, nxp >> > (flu, t_next);
 
 			/*吹吸边界条件*/
             /*
@@ -1304,12 +1314,14 @@ void calcuate()
 
 			bc_presure << < nzp, nxp >> > (flu); cudaDeviceSynchronize();
 
-			bc_velocity << < nzp, nxp >> > (flu, current_time);
+			bc_velocity << < nzp, nxp >> > (flu, t_next);
 
 			/*update*/
 
 			CHECK_CUDA(cudaMemcpy(&s3tot_host, s3tot, sizeof(double), cudaMemcpyDeviceToHost));
 			prgradaver += nu * (s3tot_host) / nxzc / ylength * rk[ns].alpha / dt;
+			
+			t_stage_start = t_next;
 
 		}
 
