@@ -46,9 +46,9 @@ __global__ void correct_rhsx(fluid* flu, process_variables* var, dyDir* dydir, Y
 // __global__ void uhat_coe(process_variables* var, Ypara* ypara, int ns, double* a, double* b, double* c, double* d, int k, RK* rk);
 // void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk);
 
-__global__ void uhat_coe(process_variables* var, Ypara* ypara, int ns, double* a, double* b, double* c, double* d, int k, RK* rk, double u_wall_next);
+__global__ void uhat_coe(process_variables* var, Ypara* ypara, int ns, double* a, double* b, double* c, double* d, int k, RK* rk, double dU_wall);
 
-void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk, double u_wall_next);
+void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk, double dU_wall);
 
 __global__ void uhat_update(fluid* flu, double* d, int k);
 

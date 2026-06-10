@@ -330,7 +330,7 @@ __global__ void correct_rhsx(fluid* flu, process_variables* var, dyDir* dydir, Y
 
 
 /*uhat*/
-__global__ void uhat_coe(process_variables* var, Ypara* ypara, int ns, double* a, double* b, double* c, double* d, int k, RK* rk, double u_wall_next)
+__global__ void uhat_coe(process_variables* var, Ypara* ypara, int ns, double* a, double* b, double* c, double* d, int k, RK* rk, double dU_wall)
 {
 	int i = threadIdx.x;
 	int j = blockIdx.x;
@@ -342,13 +342,13 @@ __global__ void uhat_coe(process_variables* var, Ypara* ypara, int ns, double* a
 		d[i * nyc + j] = var[d_Ord3(i, (j + 1), k, nzp, nxp)].rhsx;
 
         if (j == 0) {
-			d[i * nyc + j] += ( rk[ns].alpha * nu) * ypara[1].am2cForCN * u_wall_next;
+			d[i * nyc + j] += ( 0.5 * rk[ns].alpha * nu) * ypara[1].am2cForCN * dU_wall;
 		}
 		
 	}
 }
 
-void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk, double u_wall_next)
+void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk, double dU_wall)
 {
 	//cusparseHandle_t handle;
 	//CHECK_CUSPARSE(cusparseCreate(&handle));
@@ -359,7 +359,7 @@ void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, doubl
 	{
 		//size_t bufferSize;
 		//void* buffer = nullptr;
-		uhat_coe << <nyc, nxp >> > (var, ypara, ns, a, b, c, d, k, rk, u_wall_next);
+		uhat_coe << <nyc, nxp >> > (var, ypara, ns, a, b, c, d, k, rk, dU_wall);
 
 		//if (ns == 1)
 		//{
@@ -1244,8 +1244,15 @@ void calcuate()
 		{
 			CHECK_CUDA(cudaMemcpy(s3tot, &zero, sizeof(double), cudaMemcpyHostToDevice));
             /*修改时间补偿*/
-            double t_next = t_stage_start + rk[ns].alpha;
-			double u_wall_next = U_osc * cos(omega * t_next) - uCRF;
+            double t_current = t_stage_start;
+            double t_next    = t_current + rk[ns].alpha;
+
+            // 分别计算当前时刻和下一时刻的物理壁面速度
+            double u_wall_current = U_osc * cos(omega * t_current) - uCRF;
+            double u_wall_next = U_osc * cos(omega * t_next) - uCRF;
+            
+            // 求出在这一个极小的 RK 子步内的速度增量
+            double dU_wall = u_wall_next - u_wall_current;
 			/*修改时间补偿*/
 
 			Update_VelInterp_uvw << < gridDim, blockDim >> > (flu, uxhx, uyhx, uzhx, uxhz, uyhz, uzhz);  //flu ��Ҫ��gpu�϶���
@@ -1275,7 +1282,7 @@ void calcuate()
 			//}
 
             /*修改真实速度*/
-			uhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device, u_wall_next);
+			uhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device, dU_wall);
 			/*修改真实速度*/
 			what_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device);
 			vhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device);
@@ -1319,7 +1326,7 @@ void calcuate()
 			/*update*/
 
 			CHECK_CUDA(cudaMemcpy(&s3tot_host, s3tot, sizeof(double), cudaMemcpyDeviceToHost));
-			prgradaver += nu * (s3tot_host) / nxzc / ylength * rk[ns].alpha / dt;
+			//prgradaver += nu * (s3tot_host) / nxzc / ylength * rk[ns].alpha / dt;
 
 			t_stage_start = t_next;
 
