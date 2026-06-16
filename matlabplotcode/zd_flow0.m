@@ -3,7 +3,7 @@ clear; clc; close all;
 %% 1. 基础配置 (物理与路径参数)
 %% ========================================================================
 % --- 路径 ---
-dns_dir = 'E:\file\zd\zero_flow\Re_delta=1000';          % 修改为你实际存放数据的目录
+dns_dir = 'E:\file\zd\zero_flow\Re_delta=500';          % 修改为你实际存放数据的目录
 fname_stat   = 'stat.dat';
 fname_mesh   = 'mesh.dat';
 % --- 网格输出参数 (对应你 C++ 里的 xskip, yskip, zskip) ---
@@ -12,31 +12,36 @@ x_length = 384 / 2;
 % y_length = 191 + 1;    
 % y_length = 257 + 1; 
 % y_length = 383 + 1; 
-y_length = 513 + 1; 
+% y_length = 513 + 1; 
 z_length = 256 / 2;   
 % --- 物理与震荡参数 (务必与 parameters.h 保持一致) ---
 U_osc = 1.0;
 omega = 2.0 * pi;
 
-Re_delta = 1000.0;                 % 你当前跑的目标 Re_delta
+Re_delta = 500.0;                 % 你当前跑的目标 Re_delta
 
 nu = (2.0 * U_osc^2) / (omega * Re_delta^2);
 delta = sqrt(2.0 * nu / omega); % Stokes 穿透深度
-dt = 0.0002;            % 时间步长
+% dt = 0.0002;            % 时间步长
+dt = 0.001;   
 output_interval = 10;  % clcstat 的输出间隔 (t % 10 == 0)
 %% ========================================================================
 %% 2. 读取 mesh.dat (按你的逻辑精确提取 yc)
 %% ========================================================================
 fprintf('正在读取 %s...\n', fullfile(dns_dir, fname_mesh));
 xyz = importdata(fullfile(dns_dir, fname_mesh));
-if length(xyz) ~= (x_length + y_length + z_length)
-     error('mesh.dat 长度不匹配，请检查 x/y/z_length 设置');
+
+% 利用总长度减去固定的 x 和 z 长度，自动得出当前的 y_length
+y_length = length(xyz) - x_length - z_length; 
+    
+if y_length <= 0
+    error('Re_delta=%d 的 mesh.dat 长度异常！', current_Re);
 end
-% 提取 y 坐标 (包含虚拟网格)
+    
 y = xyz(x_length+1 : x_length+y_length);
-% 定义内部点坐标 yc
 yc = y(2:end-1); 
 nyc = length(yc);
+fprintf('y方向网格为 %d\n', y_length);
 %% ========================================================================
 %% 3. 读取 stat.dat (按你的矩阵逻辑)
 %% ========================================================================
@@ -78,12 +83,12 @@ start_snap = max(1, num_steps - snaps_per_period + 1);
 
 % 智能抽样画图
 
-max_plot_lines = 8; 
+max_plot_lines = 10; 
 
 plot_step = max(1, round(snaps_per_period / max_plot_lines));
-% plot_indices = start_snap : plot_step : num_steps;
-plot_indices = 201 : plot_step : 700;
-
+plot_indices = start_snap : plot_step : num_steps;
+% plot_indices = 201 : plot_step : 700;
+% plot_indices = 1 : plot_step : 100;
 % === 核心修改：生成两组不同的渐变色 ===
 % DNS 用 winter 冷色调 (蓝到绿)，解析解用 autumn 暖色调 (红到黄)
 colors_dns = winter(length(plot_indices) + 2); 

@@ -4,12 +4,13 @@ clear; clc; close all;
 %% 1. 全局配置与算例列表
 %% ========================================================================
 base_dir = 'E:\file\zd\zero_flow';       % 你的根目录
-Re_delta_list = [ 100, 300, 500, 700, 1000]; % 你目前跑完的算例雷诺数
-
+% Re_delta_list = [ 100, 300, 500, 700, 1000]; % 你目前跑完的算例雷诺数
+Re_delta_list = [500];
 % 全局物理与时间参数
 U_osc = 1.0;
 omega = 2.0 * pi;
-dt = 0.0002;
+% dt = 0.0002;
+dt = 0.001;
 output_interval = 10;
 
 % 水平和展向的抽样网格数通常是固定的
@@ -76,12 +77,27 @@ for idx = 1:length(Re_delta_list)
     time_array = (start_snap : num_steps) * output_interval * dt;
     U_wall_array = U_osc * cos(omega * time_array);
     
-    % 提取第一层网格的瞬态速度
+    % 提取第一层和第二层网格的瞬态速度
     u_1_transient = u_mean_transient(1, start_snap:num_steps);
+    u_2_transient = u_mean_transient(2, start_snap:num_steps);
     
-    % 计算动态粘性与壁面摩擦力 tau_w (一阶差分)
+    % 计算动态粘性
     nu = (2.0 * U_osc^2) / (omega * current_Re^2);
-    tau_w_dns = nu * (U_wall_array - u_1_transient) / yc(1);
+    
+    % ---------------------------------------------------------------------
+    % 非均匀网格边界处的二阶差分 (Second-order Finite Difference)
+    % ---------------------------------------------------------------------
+    % 获取近壁面前两层网格的绝对法向坐标
+    y1 = yc(1);
+    y2 = yc(2);
+    
+    % 计算 -du/dy 在壁面 (y=0) 处的各项权重系数
+    c0 = (y1 + y2) / (y1 * y2);
+    c1 = -y2 / (y1 * (y2 - y1));
+    c2 = y1 / (y2 * (y2 - y1));
+    
+    % 二阶精度计算壁面摩擦力 tau_w (严格保留了原有的符号与相位约定)
+    tau_w_dns = nu * (c0 * U_wall_array + c1 * u_1_transient + c2 * u_2_transient);
     
     % ---------------------------------------------------------------------
     % D. 寻峰法提取相位差 (Peak Detection)
@@ -104,8 +120,24 @@ for idx = 1:length(Re_delta_list)
             t_tau_peak = time_array(idx_tau);
             
             % 计算时间差 -> 转换为角度
+            % 计算时间差 -> 转换为原始角度
             delta_t = t_U_peak - t_tau_peak;
-            phi_dns_list(idx) = (delta_t / (2*pi/omega)) * 360;
+            phi_raw = (delta_t / (2*pi/omega)) * 360;
+            
+            % ---------------------------------------------------------
+            % 相位折叠修正：将角度强行映射到 0 到 45 度的物理超前角区间
+            % ---------------------------------------------------------
+            phi_mod = mod(phi_raw, 360); % 剔除多余的完整周期
+            
+            % 如果角度落在 180~360 之间（例如 338.4），说明是从反方向绕了长程
+            % 用 360 减去该值，直接折叠回真实的微小超前角 (例如 21.6)
+            if phi_mod > 180
+                phi_final = 360 - phi_mod;
+            else
+                phi_final = phi_mod;
+            end
+            
+            phi_dns_list(idx) = phi_final;
             
             fprintf('[✔] Re_delta = %-4d | 网格 y_length = %-3d | 相位差 = %5.2f°\n', ...
                 current_Re, y_length, phi_dns_list(idx));
