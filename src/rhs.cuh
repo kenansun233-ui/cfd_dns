@@ -1,18 +1,6 @@
 #ifndef rhs
 #define rhs
 
-#include "cusparse.h"
-
-#define CHECK_CUSPARSE(func) {                                          \
-    cusparseStatus_t status = (func);                                   \
-    if (status != CUSPARSE_STATUS_SUCCESS) {                            \
-        std::cerr << "CUSPARSE API failed at line " << __LINE__         \
-                  << " with error: " << cusparseGetErrorString(status)  \
-                  << std::endl;                                         \
-        exit(EXIT_FAILURE);                                             \
-    }                                                                   \
-}
-
 #define CHECK_CUDA(func) {                                              \
     cudaError_t status = (func);                                        \
     if (status != cudaSuccess) {                                        \
@@ -44,24 +32,26 @@ __global__ void rhsy(fluid* flu, process_variables* var, dyDir* dydir, Ypara* yp
 __global__ void correct_rhsx(fluid* flu, process_variables* var, dyDir* dydir, Ypara* ypara, double* s3tot, int ns, RK* rk);
 
 // __global__ void uhat_coe(process_variables* var, Ypara* ypara, int ns, double* a, double* b, double* c, double* d, int k, RK* rk);
-// void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk);
+// void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, RK* rk);
 
 __global__ void uhat_coe(process_variables* var, Ypara* ypara, int ns, double* a, double* b, double* c, double* d, int k, RK* rk, double dU_wall);
 
-void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk, double dU_wall);
+void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, RK* rk, double dU_wall);
 
 __global__ void uhat_update(fluid* flu, double* d, int k);
 
 __global__ void vhat_coe(process_variables* var, Ypara* ypara, int ns, double* a, double* b, double* c, double* d, int k, RK* rk);
-void vhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk);
+void vhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, RK* rk);
 __global__ void vhat_update(fluid* flu, double* d, int k);
 
 __global__ void what_coe(process_variables* var, Ypara* ypara, int ns, double* a, double* b, double* c, double* d, int k, RK* rk);
-void what_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk);
+void what_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, RK* rk);
 __global__ void what_update(fluid* flu, double* d, int k);
 
 //__global__ void bc_velocity(fluid* flu);
 __global__ void bc_velocity(fluid* flu, double current_time);
+
+__global__ void apply_temporary_roughness_trip(fluid* flu, dyDir* dydir, RK* rk, int ns, double current_time);
 
 __global__ void bc_prsrc(cufftDoubleComplex* prsrc);
 
@@ -81,7 +71,7 @@ void calcuate();
 
 
 __global__ void clcPPE_cof(Ypara* ypara, double* ak1, double* ak3, cufftDoubleComplex* prsrc, double* a, double* b, double* c, double* d, double* e, int k);
-void clcPPE_1025(Ypara* ypara, double* ak1, double* ak3, cufftDoubleComplex* prsrc, double* a, double* b, double* c, double* d, double* e, cusparseHandle_t handle);
+void clcPPE_1025(Ypara* ypara, double* ak1, double* ak3, cufftDoubleComplex* prsrc, double* a, double* b, double* c, double* d, double* e);
 __global__ void clcPPE_update(cufftDoubleComplex* prsrc, double* d, double* e, int k);
 
 __global__ void ForwardElimination(int m, int n, double* aj, double* bj, double* cj, double* fj, double* vecm, double* arrmn);

@@ -7,8 +7,6 @@
 
 #include "cufft.h"
 #include <cuda_runtime.h>
-#include "cusparse.h"
-#include "cusparse_v2.h"
 #include <chrono>
 
 #include "stdio.h"
@@ -26,16 +24,6 @@
 using namespace std;
 
 
-
-#define CHECK_CUSPARSE(func) {                                          \
-    cusparseStatus_t status = (func);                                   \
-    if (status != CUSPARSE_STATUS_SUCCESS) {                            \
-        std::cerr << "CUSPARSE API failed at line " << __LINE__         \
-                  << " with error: " << cusparseGetErrorString(status)  \
-                  << std::endl;                                         \
-        exit(EXIT_FAILURE);                                             \
-    }                                                                   \
-}
 
 #define CHECK_CUDA(func) {                                              \
     cudaError_t status = (func);                                        \
@@ -99,7 +87,7 @@ int main()
 
     calcuate();
 #ifdef Output_Restart
-    output_restart(flu_host, var);   
+    output_restart(flu, flu_host, var);   
 #endif 
  
 

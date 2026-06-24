@@ -14,7 +14,6 @@
 #include "src/init.cuh"
 #include "src/rhs.cuh"
 
-#include "cusparse.h"
 #include "cufft.h"
 
 
@@ -312,8 +311,8 @@ __global__ void rhsy(fluid* flu, process_variables* var, dyDir* dydir, Ypara* yp
 __global__ void correct_rhsx(fluid* flu, process_variables* var, dyDir* dydir, Ypara* ypara, double* s3tot, int ns, RK* rk)  
 {
 	double dp1ns = nu * (*s3tot) / nxzc / ylength * rk[ns].alpha;
-// 如果处于阶段一 (静水零横流)，则强行关闭质量反馈驱动
-	if (abs(ubulk) < 1e-12) {
+
+	if (!enable_bulk_pressure_feedback) {
 		dp1ns = 0.0;
 	}
 
@@ -348,7 +347,7 @@ __global__ void uhat_coe(process_variables* var, Ypara* ypara, int ns, double* a
 	}
 }
 
-void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk, double dU_wall)
+void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, RK* rk, double dU_wall)
 {
 	//cusparseHandle_t handle;
 	//CHECK_CUSPARSE(cusparseCreate(&handle));
@@ -419,7 +418,7 @@ __global__ void vhat_coe(process_variables* var, Ypara* ypara, int ns, double* a
 	}
 }
 
-void vhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk)
+void vhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, RK* rk)
 {
 	//cusparseHandle_t handle;
 	//CHECK_CUSPARSE(cusparseCreate(&handle));
@@ -482,7 +481,7 @@ __global__ void what_coe(process_variables* var, Ypara* ypara, int ns, double* a
 	}
 }
 
-void what_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk)
+void what_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, RK* rk)
 {
 	//cusparseHandle_t handle;
 	//CHECK_CUSPARSE(cusparseCreate(&handle));
@@ -754,7 +753,7 @@ __global__ void clcPPE(fluid* flu, process_variables* var, Ypara* ypara, double*
 
 }
 
-void clcPPE_1025(Ypara* ypara, double* ak1, double* ak3, cufftDoubleComplex* prsrc, double* a, double* b, double* c, double* d, double* e, cusparseHandle_t handle)
+void clcPPE_1025(Ypara* ypara, double* ak1, double* ak3, cufftDoubleComplex* prsrc, double* a, double* b, double* c, double* d, double* e)
 {
 	for (int k = 0; k < nzp; k++)
 	{
@@ -976,6 +975,75 @@ __global__ void bc_velocity(fluid* flu, double current_time)
 		flu[d_Ord3(ic, 0, kc, nzp, nxp)].u = 2.0 * u_wall - flu[d_Ord3(ic, 1, kc, nzp, nxp)].u;
 		flu[d_Ord3(ic, 0, kc, nzp, nxp)].w = -flu[d_Ord3(ic, 1, kc, nzp, nxp)].w;
 	}
+}
+
+__global__ void apply_temporary_roughness_trip(fluid* flu, dyDir* dydir, RK* rk, int ns, double current_time)
+{
+	int ic = blockIdx.x * blockDim.x + threadIdx.x;
+	int jc = blockIdx.y * blockDim.y + threadIdx.y + 1;
+	int kc = blockIdx.z * blockDim.z + threadIdx.z;
+
+	if (ic >= nxp || jc >= nyp || kc >= nzp) {
+		return;
+	}
+
+	double period = 2.0 * PI / omega;
+	double cutoff_time = roughness_trip_cutoff_cycle * period;
+	if (!enable_temporary_roughness_trip || current_time > cutoff_time) {
+		return;
+	}
+
+	double local_delta = sqrt(2.0 * nu / omega);
+	double eta = dydir[jc].yc / local_delta;
+
+	double Lx = nxp * dx;
+	double Lz = nzp * dz;
+	double x = ic * dx + 0.5 * dx;
+	double z = kc * dz + 0.5 * dz;
+
+	double trip_center = roughness_trip_center_x * Lx;
+	double trip_length = roughness_trip_length_x * Lx;
+	double half_length = 0.5 * trip_length;
+	double xr = x - trip_center;
+	if (xr > 0.5 * Lx) {
+		xr -= Lx;
+	}
+	if (xr < -0.5 * Lx) {
+		xr += Lx;
+	}
+	if (fabs(xr) > half_length) {
+		return;
+	}
+
+	double xi = xr / half_length;
+	double hump = 0.5 * (1.0 + cos(PI * xi));
+	double dhump_dx = -0.5 * sin(PI * xi) * PI / half_length;
+
+	double eta_shift = (eta - roughness_trip_eta_center) / roughness_trip_eta_width;
+	double envelope = exp(-eta_shift * eta_shift);
+	double denv_deta = -2.0 * eta_shift / roughness_trip_eta_width * envelope;
+	double denv_dy = denv_deta / local_delta;
+
+	double phase = current_time / cutoff_time;
+	if (phase > 1.0) {
+		phase = 1.0;
+	}
+	double temporal = 0.5 * (1.0 - cos(PI * phase));
+	double z_mod = 1.0 + roughness_trip_spanwise_mod * (
+		cos(2.0 * PI * z / Lz + 0.25) + 0.5 * cos(4.0 * PI * z / Lz - 0.40));
+
+	// Streamfunction psi = A * H(x) * G(y) gives a divergence-free 2-D trip:
+	// u_trip = dpsi/dy, v_trip = -dpsi/dx. A small spanwise modulation seeds spots.
+	double accel_scale = roughness_trip_amp * temporal * z_mod;
+	double mode_u = accel_scale * hump * denv_dy * local_delta;
+	double mode_v = -accel_scale * dhump_dx * envelope * local_delta;
+	double mode_w = roughness_trip_spanwise_mod * accel_scale * hump * envelope
+		* sin(2.0 * PI * z / Lz + 0.25);
+
+	int id = d_Ord3(ic, jc, kc, nzp, nxp);
+	flu[id].u += rk[ns].alpha * mode_u;
+	flu[id].v += rk[ns].alpha * mode_v;
+	flu[id].w += rk[ns].alpha * mode_w;
 }
 
 __global__ void bc_presure(fluid* flu)
@@ -1229,9 +1297,6 @@ void calcuate()
 
 	double prgradaver = 0.0, s3tot_host = 0.0;
 
-	cusparseHandle_t handle;
-	CHECK_CUSPARSE(cusparseCreate(&handle));
-
 	clock_t start, finish;
 
 	start = clock();
@@ -1282,10 +1347,16 @@ void calcuate()
 			//}
 
             /*修改真实速度*/
-			uhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device, dU_wall);
+			uhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, rk_device, dU_wall);
 			/*修改真实速度*/
-			what_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device);
-			vhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device);
+			what_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, rk_device);
+			vhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, rk_device);
+
+			if (enable_temporary_roughness_trip)
+			{
+				apply_temporary_roughness_trip << < gridDim, blockDim >> > (flu, dydir_device, rk_device, ns, t_next);
+				cudaDeviceSynchronize();
+			}
 
 			bc_velocity << < nzp, nxp >> > (flu, t_next);
 
@@ -1304,7 +1375,7 @@ void calcuate()
 
 			CHECK_CUFFT(cufftExecZ2Z(plan, (cufftDoubleComplex*)prsrc, (cufftDoubleComplex*)prsrc, CUFFT_FORWARD)); cudaDeviceSynchronize();
 
-			clcPPE_1025(ypara_device, ak1, ak3, prsrc, aa, bb, cc, dd, pp, handle);
+			clcPPE_1025(ypara_device, ak1, ak3, prsrc, aa, bb, cc, dd, pp);
 
 			//clcPPE << < nzp, nxp >> > (flu, var, ypara_device, ak1, ak3, prsrc); cudaDeviceSynchronize();
 
@@ -1343,7 +1414,7 @@ void calcuate()
 		if (t % 10 == 0 && t <= timemax && t > 0)
 		{
 			//output_velocity(flu, flu_host, t);
-			clcstat(flu);
+			clcstat(flu, (t + 1) * dt, t);
 		}
 		if (t != 0 && t % 5000 == 0 && t <= timemax)
 		{
@@ -1360,29 +1431,15 @@ void calcuate()
 		//{
 		//	output_velocity(flu, flu_host, t);
 		//}
-		if (t % 10 == 0 && t <= timemax)
+		if (t % 2 == 0 && t <= timemax)
 		{
-			clcstat(flu);
+			clcstat(flu, (t + 1) * dt, t);
 		}
 		if (t != 0 && t % 5000 == 0 && t <= timemax)
 		{
 			//output_velocity(flu, flu_host, t);
 			output_restart(flu, flu_host, var);
 		}
-
-		// ===== 修改：一气呵成的工作流 =====
-		// 仅在 25000 步稳定后，至 30000 步期间，每 10 步采样一次 (共获取 500 个样本)
-		if (t > 25000 && t <= 30000 && t % 10 == 0)
-		{
-			accumulate_tau_w(flu);  // 调用我们新写的极速 GPU 累加器
-		}
-
-		// 在第 30000 步彻底结束时，一键输出结果
-		if (t == 30000)
-		{
-			output_fig5(); 
-		}
-		// ==================================
 
 #endif
 	}
@@ -1393,7 +1450,6 @@ void calcuate()
 	//output for restart
 
 
-	CHECK_CUSPARSE(cusparseDestroy(handle));
 	cudaFree(uxhx);
 	cudaFree(uyhx);
 	cudaFree(uzhx);

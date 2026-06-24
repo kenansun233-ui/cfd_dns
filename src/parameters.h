@@ -25,16 +25,13 @@ struct process_variables
 	double rhsy;
 	double rhsz;
 
-	//cufftDoubleComplex* prsrc;
-	//double prsrc;
-
-	/*��취�Ż�*/
-	//double uxhx;
-	//double uyhx;
-	//double uzhx;
-	//double uxhz;
-	//double uyhz;
-	//double uzhz;
+	// Cached interpolation fields were moved to separate work arrays.
+	// double uxhx;
+	// double uyhx;
+	// double uzhx;
+	// double uxhz;
+	// double uyhz;
+	// double uzhz;
 };
 
 struct Ypara //y-dir interpolation para and the number =1:nyc
@@ -100,6 +97,21 @@ constexpr double PI = 3.14159265358979323846264338327950288;
 constexpr double U_osc = 1.0;          // 震荡速度振幅
 constexpr double omega = 2.0 * PI;     // 震荡圆频率 (周期 T = 1.0)
 constexpr double Re_delta = 700.0;     // 目标震荡雷诺数 (控制穿透深度和粘度)
+constexpr bool enable_bulk_pressure_feedback = false;
+
+// --- Bypass transition controls following temporary-roughness trip studies ---
+// Set bypass_perturbation_amp = 0.0 for a clean laminar Stokes validation.
+constexpr double bypass_perturbation_amp = 1.0e-6 * U_osc;
+constexpr bool enable_temporary_roughness_trip = true;
+constexpr double roughness_trip_amp = 0.80 * U_osc * omega;
+constexpr double roughness_trip_cutoff_cycle = 0.531;
+constexpr double roughness_trip_center_x = 0.50;   // fraction of xlength
+constexpr double roughness_trip_length_x = 0.18;   // fraction of xlength
+constexpr double roughness_trip_eta_center = 0.35; // y / Stokes delta
+constexpr double roughness_trip_eta_width = 0.35;
+constexpr double roughness_trip_spanwise_mod = 0.03;
+constexpr bool output_tau_wall_maps = true;
+constexpr int tau_wall_map_interval = 2;
 
 #ifdef ZERO_CROSS_FLOW
 	// 阶段一：纯震荡层流验证
@@ -113,12 +125,11 @@ constexpr double Re_delta = 700.0;     // 目标震荡雷诺数 (控制穿透深
 	constexpr double nu = 3.37668E-5;  
 #endif
 
-// constexpr double xlength = 6.283185307;
-constexpr double xlength = 1.5707963265;
+// Use a pi-fraction domain with enough x/z resolution for roughness-triggered spots.
+constexpr double xlength = PI / 16.0;
 // constexpr double ylength = 2.0;//全槽道
 constexpr double ylength = 1.0;//半槽道
-// constexpr double zlength = 3.141592654;
-constexpr double zlength = 0.7853981634;
+constexpr double zlength = PI / 64.0;
 
 // constexpr int nxp = 640;
 // constexpr int nyp = 511;
@@ -129,7 +140,7 @@ constexpr double zlength = 0.7853981634;
 // constexpr int nyp = 257;
 // constexpr int nzp = 256;
 
-constexpr int nxp = 256;
+constexpr int nxp = 512;
 constexpr int nyp = 385;
 constexpr int nzp = 128;
 
@@ -176,12 +187,12 @@ constexpr double interpcoe4 = -1.0 / 16.0;
 
 constexpr double zero = 0.0;
 
-constexpr double dt = 0.001;
+constexpr double dt = 0.0005;
 
 #ifdef Restart
-constexpr int timemax = 20000;
+constexpr int timemax = 30000;
 #else
-constexpr int timemax = 20000;
+constexpr int timemax = 6000;
 #endif // Restart
 
 

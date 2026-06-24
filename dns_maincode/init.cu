@@ -143,7 +143,7 @@ void init_fluid(fluid* flu)
 	double height = ylength;//半槽道
 	// 保留你原本严格验证过的雷诺数计算逻辑，但当 ubulk = 0 时规避 NaN 运算
 	double Re = 1.0; 
-	if (abs(ubulk) > 1e-12) {
+	if (fabs(ubulk) > 1e-12) {
 		Re = ubulk * height / nu;
 	}
 	double Retau = 0.1538 * pow(Re, 0.887741);
@@ -155,7 +155,7 @@ void init_fluid(fluid* flu)
 	double wx = 2.0 * PI / 500.0;
 	double wz = 2.0 * PI / 200.0;
 
-	if (abs(ubulk) > 1e-12) {
+	if (fabs(ubulk) > 1e-12) {
 		double xlength_plus = xlength * utau / nu;
 		double zlength_plus = zlength * utau / nu;
 
@@ -198,103 +198,75 @@ void init_fluid(fluid* flu)
 		uzmean[jc] = uzmean[jc] / (nxzc);
 	}
 	
-  if (abs(ubulk) > 1e-12) {
+  if (fabs(ubulk) > 1e-12) {
 		uxmean = uxmean / (nxzc * ylength);
 	}
 
 	std::uniform_real_distribution<double> noise(-1.0, 1.0);
 
-	/* Stokes震荡初始条件 */
-    double amp = 0.05 * U_osc; 
 
-    double Lx = nxp * dx;
-    double Lz = nzp * dz;
+	double amp = bypass_perturbation_amp; 
 
-    // 计算局部的真实物理穿透深度 delta
-    double local_nu = (2.0 * U_osc * U_osc) / (omega * Re_delta * Re_delta);
-    double local_delta = sqrt(2.0 * local_nu / omega);
+	double Lx = nxp * dx;
+	double Lz = nzp * dz;
+	double kx1 = 2.0 * PI / Lx;
+	double kz1 = 2.0 * PI / Lz;
+	double kx2 = 2.0 * kx1;
+	double kz2 = kz1;
+	double kx3 = kx1;
+	double kz3 = 2.0 * kz1;
 
-    // =========================================================
-    // 模态 1：宏观流向条带扰动 (针对宏观水槽与定来流)
-    // =========================================================
-    double kx1 = 1.0 * 2.0 * PI / Lx;
-    double kz1 = 4.0 * 2.0 * PI / Lz;
-    double K2_1 = kx1 * kx1 + kz1 * kz1;
 
-    // =========================================================
-    // 模态 2：微观靶向高频扰动 (针对斯托克斯震荡底壁)
-    // 强制锁定最不稳定物理无量纲波数 (alpha*delta ≈ 0.5, beta*delta ≈ 1.0)
-    // =========================================================
-    double target_alpha = 0.5;
-    double target_beta  = 1.0;
-    // 自动反推在这个巨大的 Lx 中，应该塞入多少个微观发卡涡
-    int n_x2 = max(1, (int)round((target_alpha / local_delta) * Lx / (2.0 * PI)));
-    int n_z2 = max(1, (int)round((target_beta  / local_delta) * Lz / (2.0 * PI)));
-    double kx2 = n_x2 * 2.0 * PI / Lx;
-    double kz2 = n_z2 * 2.0 * PI / Lz;
-    double K2_2 = kx2 * kx2 + kz2 * kz2;
+	double local_delta = sqrt(2.0 * nu / omega);
 
-    for (jc = 1; jc < nyp; jc++)
-    {
-        double y = dydir[jc].yc;
-        double y_star = y / local_delta;
+	for (jc = 1; jc < nyp; jc++)
+	{
 
-        // 构造满足法向边界条件的形函数 V(y) 和它的严格一阶导数 dV/dy
-        double V_y = amp * (y_star * y_star) * exp(-y_star);
-        double dV_dy = (amp / local_delta) * (2.0 * y_star - y_star * y_star) * exp(-y_star);
+		double y = dydir[jc].yc;
+		double y_star = y / local_delta;
 
-        for (kc = 0; kc < nzp; kc++)
-        {
-            double zp = kc * dz + 0.5 * dz;
-            for (ic = 0; ic < nxp; ic++)
-            {
-                double xp = ic * dx + 0.5 * dx;
+		double f_y = 1.85 * (y_star * y_star) * exp(-y_star);
+		double near_wall_window = 1.0 - exp(-pow(y_star / 0.20, 4.0));
+		f_y *= near_wall_window;
 
-                // -----------------------------------------------------
-                // 生成绝对无散度 (Divergence-Free) 的三维扰动场
-                // 严谨满足： du/dx + dv/dy + dw/dz = 0
-                // -----------------------------------------------------
-                
-                // 1. 宏观扰动成分计算
-                double u_p1 = -dV_dy * (kx1 / K2_1) * sin(kx1 * xp) * sin(kz1 * zp);
-                double v_p1 =  V_y  * cos(kx1 * xp) * sin(kz1 * zp);
-                double w_p1 =  dV_dy * (kz1 / K2_1) * cos(kx1 * xp) * cos(kz1 * zp);
+		for (kc = 0; kc < nzp; kc++)
+		{
+			double zp = kc * dz + 0.5 * dz;
+			for (ic = 0; ic < nxp; ic++)
+			{
+				double xp = ic * dx + 0.5 * dx;
 
-                // 2. 微观靶向扰动成分计算
-                double u_p2 = -dV_dy * (kx2 / K2_2) * sin(kx2 * xp) * sin(kz2 * zp);
-                double v_p2 =  V_y  * cos(kx2 * xp) * sin(kz2 * zp);
-                double w_p2 =  dV_dy * (kz2 / K2_2) * cos(kx2 * xp) * cos(kz2 * zp);
+				if (fabs(ubulk) < 1e-12) {
+					double mode11 = sin(kz1 * zp) * cos(kx1 * xp);
+					double mode21 = sin(kz2 * zp + 0.35) * cos(kx2 * xp + 0.20);
+					double mode12 = sin(kz3 * zp + 0.70) * cos(kx3 * xp - 0.15);
 
-                // 3. 组合双频总扰动
-                double u_pert = u_p1 + u_p2;
-                double v_pert = v_p1 + v_p2;
-                double w_pert = w_p1 + w_p2;
+					double vort11 = cos(kz1 * zp) * sin(kx1 * xp);
+					double vort21 = cos(kz2 * zp + 0.35) * sin(kx2 * xp + 0.20);
+					double vort12 = cos(kz3 * zp + 0.70) * sin(kx3 * xp - 0.15);
 
-                // -----------------------------------------------------
-                // 与基流合并逻辑 (完美兼容纯震荡与混合来流)
-                // -----------------------------------------------------
-                int id = Ord3(ic, jc, kc, nzp, nxp);
+					double wall_normal = sin(kx1 * xp + 0.40) * sin(kz1 * zp - 0.25)
+						+ 0.50 * sin(kx2 * xp - 0.10) * sin(kz2 * zp + 0.45)
+						+ 0.35 * sin(kx3 * xp + 0.25) * sin(kz3 * zp + 0.10);
 
-                if (abs(ubulk) < 1e-12) {
-                    // 纯震荡流情况：直接赋予扰动
-                    flu[id].u = u_pert;
-                    flu[id].v = v_pert;
-                    flu[id].w = w_pert;
-                }
-                else {
-                    // 定来流情况：先提取并修正基流，再【叠加】扰动！
-                    double base_u = flu[id].u * ubulk / uxmean - uCRF;
-                    double base_w = flu[id].w - uzmean[jc];
-
-                    flu[id].u = base_u + u_pert; // 必须叠加，否则扰动为0
-                    flu[id].v = v_pert;          // v 方向无定常基流
-                    flu[id].w = base_w + w_pert;
-                }
-            }
-        }
-    }
-	/* Stokes震荡初始条件 */
-
+					double seed_noise = noise(gen);
+					double noise_envelope = exp(-2.0 * y_star);
+					flu[Ord3(ic, jc, kc, nzp, nxp)].u = amp * noise_envelope * seed_noise
+						+ amp * f_y * (mode11 + 0.45 * mode21 + 0.30 * mode12);
+					flu[Ord3(ic, jc, kc, nzp, nxp)].v = 0.25 * amp * f_y * wall_normal;
+					flu[Ord3(ic, jc, kc, nzp, nxp)].w = 0.50 * amp * noise_envelope * noise(gen)
+						- amp * f_y * (
+						(kx1 / kz1) * vort11
+						+ 0.45 * (kx2 / kz2) * vort21
+						+ 0.30 * (kx3 / kz3) * vort12);
+				}
+				else {
+					flu[Ord3(ic, jc, kc, nzp, nxp)].u = flu[Ord3(ic, jc, kc, nzp, nxp)].u * ubulk / uxmean - uCRF;
+					flu[Ord3(ic, jc, kc, nzp, nxp)].w = flu[Ord3(ic, jc, kc, nzp, nxp)].w - uzmean[jc];
+				}
+			}
+		}
+	}
 
 	/* 边界初始化：顶部滑移，底部 Stokes */
 	for (kc = 0; kc < nzp; kc++)
@@ -407,13 +379,12 @@ void output_prgrad(double prgradaver)
 	fclose(fp);
 }
 
-void output_restart(fluid* flu_host, process_variables* var)
+void output_restart(fluid* flu, fluid* flu_host, process_variables* var)
 {
 	int ic, jc, kc;
 	int xyzsize = nxp * (nyp + 1) * nzp;
 
-	//fluid* flu_host = (fluid*)malloc(xyzsize * sizeof(fluid));
-	//cudaMemcpy(flu_host, flu, xyzsize * sizeof(fluid), cudaMemcpyDeviceToHost);
+	cudaMemcpy(flu_host, flu, xyzsize * sizeof(fluid), cudaMemcpyDeviceToHost);
 	process_variables* var_for_output = (process_variables*)malloc(xyzsize * sizeof(process_variables));
 	cudaMemcpy(var_for_output, var, xyzsize * sizeof(process_variables), cudaMemcpyDeviceToHost);
 
@@ -471,7 +442,7 @@ void init_restart(fluid* flu, fluid* flu_host, process_variables* var)
 
 	int iu, ku;
 
-	/*�ȿ��� xskip = 2; yskip = 1; zskip = 2; ��������м򵥲�ֵ*/
+	/* Interpolate the skipped restart points for xskip = 2, yskip = 1, zskip = 2. */
 	for (jc = 0; jc <= nyp; jc = jc + yskip)
 		for (kc = 0; kc < nzp; kc = kc + zskip)
 			for (ic = 0; ic < nxp; ic = ic + xskip)
@@ -546,7 +517,7 @@ void init_restart(fluid* flu, fluid* flu_host, process_variables* var)
 	free(var_for_input);
 }
 
-void clcstat(fluid* flu)
+void clcstat(fluid* flu, double current_time, int time_step)
 {
 	int block = 256;
 	int grid = (nyp + 1 + block - 1) / block;
@@ -575,32 +546,74 @@ void clcstat(fluid* flu)
 			switch (ii)
 			{
 			case 0:
-				fprintf(fp, "%e ", stat[jc].wx); break;
+				fprintf(fp, "%.15e ", stat[jc].wx); break;
 			case 1:
-				fprintf(fp, "%e ", stat[jc].wy); break;
+				fprintf(fp, "%.15e ", stat[jc].wy); break;
 			case 2:
-				fprintf(fp, "%e ", stat[jc].wz); break;
+				fprintf(fp, "%.15e ", stat[jc].wz); break;
 			case 3:
-				fprintf(fp, "%e ", stat[jc].um); break;
+				fprintf(fp, "%.15e ", stat[jc].um); break;
 			case 4:
-				fprintf(fp, "%e ", stat[jc].vm); break;
+				fprintf(fp, "%.15e ", stat[jc].vm); break;
 			case 5:
-				fprintf(fp, "%e ", stat[jc].wm); break;
+				fprintf(fp, "%.15e ", stat[jc].wm); break;
 			case 6:
-				fprintf(fp, "%e ", stat[jc].pm); break;
+				fprintf(fp, "%.15e ", stat[jc].pm); break;
 			case 7:
-				fprintf(fp, "%e ", stat[jc].um2); break;
+				fprintf(fp, "%.15e ", stat[jc].um2); break;
 			case 8:
-				fprintf(fp, "%e ", stat[jc].vm2); break;
+				fprintf(fp, "%.15e ", stat[jc].vm2); break;
 			case 9:
-				fprintf(fp, "%e ", stat[jc].wm2); break;
+				fprintf(fp, "%.15e ", stat[jc].wm2); break;
 			case 10:
-				fprintf(fp, "%e ", stat[jc].pm2); break;
+				fprintf(fp, "%.15e ", stat[jc].pm2); break;
 			}
 		}
 		fprintf(fp, "\n");
 	}
 	fclose(fp);
+
+	sprintf_s(flu_name, "tau_wall.dat");
+	sprintf_s(filename, output_path);
+	strcat_s(filename, flu_name);
+	fopen_s(&fp, filename, "a+");
+
+	double y1 = dydir[1].yc;
+	double y2 = dydir[2].yc;
+	double c0 = (y1 + y2) / (y1 * y2);
+	double c1 = -y2 / (y1 * (y2 - y1));
+	double c2 = y1 / (y2 * (y2 - y1));
+	double u_wall = U_osc * cos(omega * current_time) - uCRF;
+	double tau_fd2 = nu * (c0 * u_wall + c1 * stat[1].um + c2 * stat[2].um);
+
+	fprintf(fp, "%.15e %.15e %.15e %.15e %.15e\n",
+		current_time, u_wall, tau_fd2, stat[1].um, stat[2].um);
+	fclose(fp);
+
+	if (output_tau_wall_maps && time_step % tau_wall_map_interval == 0)
+	{
+		int xyzsize = nxp * (nyp + 1) * nzp;
+		CHECK_CUDA(cudaMemcpy(flu_host, flu, xyzsize * sizeof(fluid), cudaMemcpyDeviceToHost));
+
+		sprintf_s(flu_name, "tau_wall_map_%08d.dat", time_step);
+		sprintf_s(filename, output_path);
+		strcat_s(filename, flu_name);
+		fopen_s(&fp, filename, "w+");
+
+		fprintf(fp, "%.15e %.15e %d %d\n", current_time, u_wall, nxp, nzp);
+		for (int kc = 0; kc < nzp; kc++)
+		{
+			for (int ic = 0; ic < nxp; ic++)
+			{
+				double u1_local = flu_host[Ord3(ic, 1, kc, nzp, nxp)].u;
+				double u2_local = flu_host[Ord3(ic, 2, kc, nzp, nxp)].u;
+				double tau_local = nu * (c0 * u_wall + c1 * u1_local + c2 * u2_local);
+				fprintf(fp, "%.15e ", tau_local);
+			}
+			fprintf(fp, "\n");
+		}
+		fclose(fp);
+	}
 
 	free(stat);
 	cudaFree(stat_dev);
