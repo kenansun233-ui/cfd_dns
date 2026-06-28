@@ -96,22 +96,25 @@ constexpr double PI = 3.14159265358979323846264338327950288;
 // --- Stokes 震荡底壁控制参数 ---
 constexpr double U_osc = 1.0;          // 震荡速度振幅
 constexpr double omega = 2.0 * PI;     // 震荡圆频率 (周期 T = 1.0)
-constexpr double Re_delta = 700.0;     // 目标震荡雷诺数 (控制穿透深度和粘度)
+constexpr double Re_delta = 600.0;     // 目标震荡雷诺数 (控制穿透深度和粘度)
 constexpr bool enable_bulk_pressure_feedback = false;
 
-// --- Bypass transition controls following temporary-roughness trip studies ---
+// --- Bypass transition controls ---
 // Set bypass_perturbation_amp = 0.0 for a clean laminar Stokes validation.
 constexpr double bypass_perturbation_amp = 1.0e-6 * U_osc;
-constexpr bool enable_temporary_roughness_trip = true;
-constexpr double roughness_trip_amp = 0.80 * U_osc * omega;
-constexpr double roughness_trip_cutoff_cycle = 0.531;
-constexpr double roughness_trip_center_x = 0.50;   // fraction of xlength
-constexpr double roughness_trip_length_x = 0.18;   // fraction of xlength
-constexpr double roughness_trip_eta_center = 0.35; // y / Stokes delta
-constexpr double roughness_trip_eta_width = 0.35;
-constexpr double roughness_trip_spanwise_mod = 0.03;
+
+// Temporary lower-wall geometry trip. The roughness moves with the oscillating wall.
+// h0 = roughness_geometry_height_delta * sqrt(2 nu / omega);
+// Ld = roughness_geometry_length_delta * sqrt(2 nu / omega).
+constexpr bool enable_temporary_roughness_geometry = true;
+constexpr double roughness_geometry_height_delta = 0.60;
+constexpr double roughness_geometry_length_delta = 17.45;
+constexpr double roughness_geometry_center_x = 0.50;       // fraction of xlength at t = 0
+constexpr double roughness_geometry_hold_cycle = 0.50;     // full height duration
+constexpr double roughness_geometry_decay_cycle = 0.05;    // smooth removal duration
+
 constexpr bool output_tau_wall_maps = true;
-constexpr int tau_wall_map_interval = 2;
+constexpr int tau_wall_map_interval = 10;
 
 #ifdef ZERO_CROSS_FLOW
 	// 阶段一：纯震荡层流验证
@@ -140,8 +143,8 @@ constexpr double zlength = PI / 64.0;
 // constexpr int nyp = 257;
 // constexpr int nzp = 256;
 
-constexpr int nxp = 512;
-constexpr int nyp = 385;
+constexpr int nxp = 576;
+constexpr int nyp = 383;
 constexpr int nzp = 128;
 
 constexpr int nxc = nxp - 1;
@@ -187,12 +190,12 @@ constexpr double interpcoe4 = -1.0 / 16.0;
 
 constexpr double zero = 0.0;
 
-constexpr double dt = 0.0005;
+constexpr double dt = 0.0002;
 
 #ifdef Restart
 constexpr int timemax = 30000;
 #else
-constexpr int timemax = 6000;
+constexpr int timemax = 15000;
 #endif // Restart
 
 

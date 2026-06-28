@@ -977,73 +977,114 @@ __global__ void bc_velocity(fluid* flu, double current_time)
 	}
 }
 
-__global__ void apply_temporary_roughness_trip(fluid* flu, dyDir* dydir, RK* rk, int ns, double current_time)
+__device__ double roughness_geometry_temporal_factor(double current_time)
+{
+	if (!enable_temporary_roughness_geometry) return 0.0;
+
+	double period = 2.0 * PI / omega;
+	double hold_time = roughness_geometry_hold_cycle * period;
+	double decay_time = roughness_geometry_decay_cycle * period;
+
+	if (current_time <= hold_time) return 1.0;
+	if (decay_time <= 0.0) return 0.0;
+	if (current_time >= hold_time + decay_time) return 0.0;
+
+	double s = (current_time - hold_time) / decay_time;
+	return 0.5 * (1.0 + cos(PI * s));
+}
+
+__device__ double roughness_geometry_height_at_x(double x, double current_time)
+{
+	double temporal = roughness_geometry_temporal_factor(current_time);
+	if (temporal <= 0.0) return 0.0;
+
+	double local_delta = sqrt(2.0 * nu / omega);
+	double height = roughness_geometry_height_delta * local_delta * temporal;
+	double length = roughness_geometry_length_delta * local_delta;
+	if (height <= 0.0 || length <= 0.0) return 0.0;
+
+	double Lx = nxp * dx;
+	double wall_displacement = (U_osc / omega) * sin(omega * current_time) - uCRF * current_time;
+	double center = roughness_geometry_center_x * Lx + wall_displacement;
+	double xr = x - center;
+	xr -= Lx * floor(xr / Lx + 0.5);
+
+	double half_length = 0.5 * length;
+	if (fabs(xr) > half_length) return 0.0;
+
+	double xi = xr / half_length;
+	return 0.5 * height * (1.0 + cos(PI * xi));
+}
+
+__global__ void apply_temporary_roughness_geometry(fluid* flu, process_variables* var, dyDir* dydir, double current_time)
 {
 	int ic = blockIdx.x * blockDim.x + threadIdx.x;
 	int jc = blockIdx.y * blockDim.y + threadIdx.y + 1;
 	int kc = blockIdx.z * blockDim.z + threadIdx.z;
 
-	if (ic >= nxp || jc >= nyp || kc >= nzp) {
-		return;
-	}
+	if (ic >= nxp || jc > nyc || kc >= nzp) return;
 
-	double period = 2.0 * PI / omega;
-	double cutoff_time = roughness_trip_cutoff_cycle * period;
-	if (!enable_temporary_roughness_trip || current_time > cutoff_time) {
-		return;
-	}
-
-	double local_delta = sqrt(2.0 * nu / omega);
-	double eta = dydir[jc].yc / local_delta;
-
-	double Lx = nxp * dx;
-	double Lz = nzp * dz;
 	double x = ic * dx + 0.5 * dx;
-	double z = kc * dz + 0.5 * dz;
+	double h = roughness_geometry_height_at_x(x, current_time);
+	if (h <= 0.0) return;
 
-	double trip_center = roughness_trip_center_x * Lx;
-	double trip_length = roughness_trip_length_x * Lx;
-	double half_length = 0.5 * trip_length;
-	double xr = x - trip_center;
-	if (xr > 0.5 * Lx) {
-		xr -= Lx;
-	}
-	if (xr < -0.5 * Lx) {
-		xr += Lx;
-	}
-	if (fabs(xr) > half_length) {
+	double u_wall = U_osc * cos(omega * current_time) - uCRF;
+	double y = dydir[jc].yc;
+	int id = d_Ord3(ic, jc, kc, nzp, nxp);
+
+	if (y <= h) {
+		flu[id].u = u_wall;
+		flu[id].v = 0.0;
+		flu[id].w = 0.0;
+		var[id].uold = 0.0;
+		var[id].vold = 0.0;
+		var[id].wold = 0.0;
+		var[id].rhsx = 0.0;
+		var[id].rhsy = 0.0;
+		var[id].rhsz = 0.0;
 		return;
 	}
 
-	double xi = xr / half_length;
-	double hump = 0.5 * (1.0 + cos(PI * xi));
-	double dhump_dx = -0.5 * sin(PI * xi) * PI / half_length;
+	bool first_fluid_above_trip = (jc == 1 || dydir[jc - 1].yc <= h);
+	if (first_fluid_above_trip && jc < nyc) {
+		int idp = d_Ord3(ic, jc + 1, kc, nzp, nxp);
+		double yp = dydir[jc + 1].yc;
+		double denom = yp - h;
+		double weight = 1.0;
+		if (denom > 1.0e-14) {
+			weight = (y - h) / denom;
+		}
+		if (weight < 0.0) weight = 0.0;
+		if (weight > 1.0) weight = 1.0;
 
-	double eta_shift = (eta - roughness_trip_eta_center) / roughness_trip_eta_width;
-	double envelope = exp(-eta_shift * eta_shift);
-	double denv_deta = -2.0 * eta_shift / roughness_trip_eta_width * envelope;
-	double denv_dy = denv_deta / local_delta;
-
-	double phase = current_time / cutoff_time;
-	if (phase > 1.0) {
-		phase = 1.0;
+		flu[id].u = u_wall + weight * (flu[idp].u - u_wall);
+		flu[id].v = weight * flu[idp].v;
+		flu[id].w = weight * flu[idp].w;
+		var[id].uold = 0.0;
+		var[id].vold = 0.0;
+		var[id].wold = 0.0;
 	}
-	double temporal = 0.5 * (1.0 - cos(PI * phase));
-	double z_mod = 1.0 + roughness_trip_spanwise_mod * (
-		cos(2.0 * PI * z / Lz + 0.25) + 0.5 * cos(4.0 * PI * z / Lz - 0.40));
+}
 
-	// Streamfunction psi = A * H(x) * G(y) gives a divergence-free 2-D trip:
-	// u_trip = dpsi/dy, v_trip = -dpsi/dx. A small spanwise modulation seeds spots.
-	double accel_scale = roughness_trip_amp * temporal * z_mod;
-	double mode_u = accel_scale * hump * denv_dy * local_delta;
-	double mode_v = -accel_scale * dhump_dx * envelope * local_delta;
-	double mode_w = roughness_trip_spanwise_mod * accel_scale * hump * envelope
-		* sin(2.0 * PI * z / Lz + 0.25);
+__global__ void apply_temporary_roughness_pressure(fluid* flu, dyDir* dydir, double current_time)
+{
+	int ic = blockIdx.x * blockDim.x + threadIdx.x;
+	int jc = blockIdx.y * blockDim.y + threadIdx.y + 1;
+	int kc = blockIdx.z * blockDim.z + threadIdx.z;
 
-	int id = d_Ord3(ic, jc, kc, nzp, nxp);
-	flu[id].u += rk[ns].alpha * mode_u;
-	flu[id].v += rk[ns].alpha * mode_v;
-	flu[id].w += rk[ns].alpha * mode_w;
+	if (ic >= nxp || jc > nyc || kc >= nzp) return;
+
+	double x = ic * dx + 0.5 * dx;
+	double h = roughness_geometry_height_at_x(x, current_time);
+	if (h <= 0.0 || dydir[jc].yc > h) return;
+
+	int jf = jc + 1;
+	while (jf <= nyc && dydir[jf].yc <= h) {
+		jf++;
+	}
+	if (jf <= nyc) {
+		flu[d_Ord3(ic, jc, kc, nzp, nxp)].p = flu[d_Ord3(ic, jf, kc, nzp, nxp)].p;
+	}
 }
 
 __global__ void bc_presure(fluid* flu)
@@ -1300,6 +1341,11 @@ void calcuate()
 	clock_t start, finish;
 
 	start = clock();
+	bc_velocity << < nzp, nxp >> > (flu, 0.0);
+	apply_temporary_roughness_geometry << < gridDim, blockDim >> > (flu, var, dydir_device, 0.0);
+	bc_velocity << < nzp, nxp >> > (flu, 0.0);
+	cudaDeviceSynchronize();
+
 	for (int t = 0; t <= timemax; t++)
 	{
         // 计算当前物理时间，用于传递给含时边界
@@ -1352,13 +1398,10 @@ void calcuate()
 			what_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, rk_device);
 			vhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, rk_device);
 
-			if (enable_temporary_roughness_trip)
-			{
-				apply_temporary_roughness_trip << < gridDim, blockDim >> > (flu, dydir_device, rk_device, ns, t_next);
-				cudaDeviceSynchronize();
-			}
-
 			bc_velocity << < nzp, nxp >> > (flu, t_next);
+			apply_temporary_roughness_geometry << < gridDim, blockDim >> > (flu, var, dydir_device, t_next);
+			bc_velocity << < nzp, nxp >> > (flu, t_next);
+			cudaDeviceSynchronize();
 
 			/*吹吸边界条件*/
             /*
@@ -1391,8 +1434,12 @@ void calcuate()
 			update_pressure << < gridDim, blockDim >> > (flu, ypara_device, rk_device, ns, prsrc); cudaDeviceSynchronize();
 
 			bc_presure << < nzp, nxp >> > (flu); cudaDeviceSynchronize();
+			apply_temporary_roughness_pressure << < gridDim, blockDim >> > (flu, dydir_device, t_next);
 
 			bc_velocity << < nzp, nxp >> > (flu, t_next);
+			apply_temporary_roughness_geometry << < gridDim, blockDim >> > (flu, var, dydir_device, t_next);
+			bc_velocity << < nzp, nxp >> > (flu, t_next);
+			cudaDeviceSynchronize();
 
 			/*update*/
 
@@ -1431,7 +1478,7 @@ void calcuate()
 		//{
 		//	output_velocity(flu, flu_host, t);
 		//}
-		if (t % 2 == 0 && t <= timemax)
+		if (t % 5 == 0 && t <= timemax)
 		{
 			clcstat(flu, (t + 1) * dt, t);
 		}

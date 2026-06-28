@@ -50,8 +50,8 @@ __global__ void what_update(fluid* flu, double* d, int k);
 
 //__global__ void bc_velocity(fluid* flu);
 __global__ void bc_velocity(fluid* flu, double current_time);
-
-__global__ void apply_temporary_roughness_trip(fluid* flu, dyDir* dydir, RK* rk, int ns, double current_time);
+__global__ void apply_temporary_roughness_geometry(fluid* flu, process_variables* var, dyDir* dydir, double current_time);
+__global__ void apply_temporary_roughness_pressure(fluid* flu, dyDir* dydir, double current_time);
 
 __global__ void bc_prsrc(cufftDoubleComplex* prsrc);
 

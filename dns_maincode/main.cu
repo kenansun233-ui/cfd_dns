@@ -62,6 +62,41 @@ int main()
     //sprintf(output_path, "C:\\Users\\customer\\Desktop\\DNS_0603\\");
     sprintf(output_path, "E:\\lch\\");
 
+    char run_info_name[200];
+    sprintf_s(run_info_name, "%srun_info.dat", output_path);
+    FILE* run_info = nullptr;
+    fopen_s(&run_info, run_info_name, "w");
+    if (run_info != nullptr)
+    {
+        fprintf(run_info, "Re_delta %.15e\n", Re_delta);
+        fprintf(run_info, "U_osc %.15e\n", U_osc);
+        fprintf(run_info, "omega %.15e\n", omega);
+        fprintf(run_info, "nu %.15e\n", nu);
+        fprintf(run_info, "dt %.15e\n", dt);
+        fprintf(run_info, "timemax %d\n", timemax);
+        fprintf(run_info, "nxp %d\n", nxp);
+        fprintf(run_info, "nyp %d\n", nyp);
+        fprintf(run_info, "nzp %d\n", nzp);
+        fprintf(run_info, "xlength %.15e\n", xlength);
+        fprintf(run_info, "ylength %.15e\n", ylength);
+        fprintf(run_info, "zlength %.15e\n", zlength);
+        fprintf(run_info, "enable_bulk_pressure_feedback %d\n", enable_bulk_pressure_feedback ? 1 : 0);
+        fprintf(run_info, "bypass_perturbation_amp %.15e\n", bypass_perturbation_amp);
+        fprintf(run_info, "enable_temporary_roughness_geometry %d\n", enable_temporary_roughness_geometry ? 1 : 0);
+        fprintf(run_info, "roughness_geometry_height_delta %.15e\n", roughness_geometry_height_delta);
+        fprintf(run_info, "roughness_geometry_length_delta %.15e\n", roughness_geometry_length_delta);
+        fprintf(run_info, "roughness_geometry_center_x %.15e\n", roughness_geometry_center_x);
+        fprintf(run_info, "roughness_geometry_hold_cycle %.15e\n", roughness_geometry_hold_cycle);
+        fprintf(run_info, "roughness_geometry_decay_cycle %.15e\n", roughness_geometry_decay_cycle);
+        fprintf(run_info, "tau_wall_map_interval %d\n", tau_wall_map_interval);
+#ifdef Restart
+        fprintf(run_info, "Restart 1\n");
+#else
+        fprintf(run_info, "Restart 0\n");
+#endif
+        fclose(run_info);
+    }
+
     CHECK_CUDA(cudaMalloc((void**)&flu, nxp * (nyp + 1) * nzp * sizeof(fluid)));
     CHECK_CUDA(cudaMalloc((void**)&var, nxp * (nyp + 1) * nzp * sizeof(process_variables)));
 
