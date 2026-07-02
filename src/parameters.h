@@ -94,41 +94,41 @@ constexpr double PI = 3.14159265358979323846264338327950288;
 #define ZERO_CROSS_FLOW 
 
 // --- Stokes 震荡底壁控制参数 ---
-constexpr double U_osc = 1.0;          // 震荡速度振幅
-constexpr double omega = 2.0 * PI;     // 震荡圆频率 (周期 T = 1.0)
-constexpr double Re_delta = 600.0;     // 目标震荡雷诺数 (控制穿透深度和粘度)
+// 当前算例: Re_omega = 1.0e5
+// 定义:
+// Re_omega = U_osc^2 / (omega * nu)
+// Re_delta = U_osc * sqrt(2.0 * nu / omega) / nu = sqrt(2.0 * Re_omega)
+// stokes_delta = sqrt(2.0 * nu / omega)
+// 若切换 Re_omega，请同步修改 U_osc、Re_delta、dt、simulation_cycles、timemax 和输出间隔。
+constexpr double Re_omega = 100000.0;  // Re_omega = U_osc^2 / (omega * nu)
+constexpr double omega = 2.0 * PI;     // 固定震荡圆频率 (周期 T = 1.0)
+constexpr double nu_fixed = 8.841941282883074e-7; // 固定运动粘度
+constexpr double U_osc = 7.453559924999298e-1;
+constexpr double Re_delta = 4.472135954999579e2;
+constexpr double stokes_delta = 5.305164769729844e-4;
 constexpr bool enable_bulk_pressure_feedback = false;
 
 // --- Bypass transition controls ---
 // Set bypass_perturbation_amp = 0.0 for a clean laminar Stokes validation.
 constexpr double bypass_perturbation_amp = 1.0e-6 * U_osc;
 
-// Temporary lower-wall geometry trip. The roughness moves with the oscillating wall.
-// h0 = roughness_geometry_height_delta * sqrt(2 nu / omega);
-// Ld = roughness_geometry_length_delta * sqrt(2 nu / omega).
-constexpr bool enable_temporary_roughness_geometry = true;
-constexpr double roughness_geometry_height_delta = 0.60;
-constexpr double roughness_geometry_length_delta = 17.45;
-constexpr double roughness_geometry_center_x = 0.50;       // fraction of xlength at t = 0
-constexpr double roughness_geometry_hold_cycle = 0.50;     // full height duration
-constexpr double roughness_geometry_decay_cycle = 0.05;    // smooth removal duration
-
 constexpr bool output_tau_wall_maps = true;
-constexpr int tau_wall_map_interval = 10;
+constexpr double stat_output_dt = 0.005;         // 记录/核对用；实际步数见 stat_output_interval
+constexpr double tau_wall_map_output_dt = 0.02;  // 记录/核对用；实际步数见 tau_wall_map_interval
 
 #ifdef ZERO_CROSS_FLOW
 	// 阶段一：纯震荡层流验证
 	constexpr double uCRF = 0.0;
 	constexpr double ubulk = 0.0;
-	constexpr double nu = (2.0 * U_osc * U_osc) / (omega * Re_delta * Re_delta); // 自动反推粘度
+	constexpr double nu = nu_fixed;
 #else
 	// 阶段二：定来流研究 (保留你原有的设置)
 	constexpr double uCRF = 0.0; 
 	constexpr double ubulk = 0.6666666666666666666666667;
-	constexpr double nu = 3.37668E-5;  
+	constexpr double nu = nu_fixed;  
 #endif
 
-// Use a pi-fraction domain with enough x/z resolution for roughness-triggered spots.
+// Use a pi-fraction domain for the oscillating boundary-layer calculation.
 constexpr double xlength = PI / 16.0;
 // constexpr double ylength = 2.0;//全槽道
 constexpr double ylength = 1.0;//半槽道
@@ -143,9 +143,9 @@ constexpr double zlength = PI / 64.0;
 // constexpr int nyp = 257;
 // constexpr int nzp = 256;
 
-constexpr int nxp = 576;
-constexpr int nyp = 383;
-constexpr int nzp = 128;
+constexpr int nxp = 768;
+constexpr int nyp = 257;
+constexpr int nzp = 192;
 
 constexpr int nxc = nxp - 1;
 constexpr int nyc = nyp - 1;
@@ -190,13 +190,12 @@ constexpr double interpcoe4 = -1.0 / 16.0;
 
 constexpr double zero = 0.0;
 
-constexpr double dt = 0.0002;
-
-#ifdef Restart
-constexpr int timemax = 30000;
-#else
-constexpr int timemax = 15000;
-#endif // Restart
+// --- 当前算例时间参数 ---
+constexpr double dt = 5.0e-5;
+constexpr double simulation_cycles = 15.0;
+constexpr int timemax = 300000;              // simulation_cycles / dt
+constexpr int stat_output_interval = 100;    // 0.005 / dt
+constexpr int tau_wall_map_interval = 400;   // 0.02 / dt
 
 
 struct RK

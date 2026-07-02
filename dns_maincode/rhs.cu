@@ -347,7 +347,7 @@ __global__ void uhat_coe(process_variables* var, Ypara* ypara, int ns, double* a
 	}
 }
 
-void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, RK* rk, double dU_wall)
+void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, RK* rk, double dU_wall, double* tri_vecm, double* tri_arrmn)
 {
 	//cusparseHandle_t handle;
 	//CHECK_CUSPARSE(cusparseCreate(&handle));
@@ -375,12 +375,12 @@ void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, doubl
 		//uhat_update << <nyc, nxp >> > (flu, d, k);
 		//CHECK_CUDA(cudaFree(buffer));
 
-		InverseTridiagonalDevice(nxp, nyc, a, b, c, d);
+		InverseTridiagonalDevice(nxp, nyc, a, b, c, d, tri_vecm, tri_arrmn);
 		uhat_update << <nyc, nxp >> > (flu, d, k);
 
 
 
-		cudaDeviceSynchronize();
+		CHECK_CUDA(cudaDeviceSynchronize());
 	}
 	//CHECK_CUSPARSE(cusparseDestroy(handle));
 }
@@ -418,7 +418,7 @@ __global__ void vhat_coe(process_variables* var, Ypara* ypara, int ns, double* a
 	}
 }
 
-void vhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, RK* rk)
+void vhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, RK* rk, double* tri_vecm, double* tri_arrmn)
 {
 	//cusparseHandle_t handle;
 	//CHECK_CUSPARSE(cusparseCreate(&handle));
@@ -445,11 +445,11 @@ void vhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, doubl
 		//CHECK_CUDA(cudaFree(buffer));
 
 
-		InverseTridiagonalDevice(nxp, nyc, a, b, c, d);
+		InverseTridiagonalDevice(nxp, nyc, a, b, c, d, tri_vecm, tri_arrmn);
 		vhat_update << <nyc, nxp >> > (flu, d, k);
 
 
-		cudaDeviceSynchronize();
+		CHECK_CUDA(cudaDeviceSynchronize());
 
 
 	}
@@ -481,7 +481,7 @@ __global__ void what_coe(process_variables* var, Ypara* ypara, int ns, double* a
 	}
 }
 
-void what_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, RK* rk)
+void what_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, RK* rk, double* tri_vecm, double* tri_arrmn)
 {
 	//cusparseHandle_t handle;
 	//CHECK_CUSPARSE(cusparseCreate(&handle));
@@ -497,11 +497,11 @@ void what_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, doubl
 		//what_update << <nyc, nxp >> > (flu, d, k);
 		//CHECK_CUDA(cudaFree(buffer));
 
-		InverseTridiagonalDevice(nxp, nyc, a, b, c, d);
+		InverseTridiagonalDevice(nxp, nyc, a, b, c, d, tri_vecm, tri_arrmn);
 		what_update << <nyc, nxp >> > (flu, d, k);
 
 
-		cudaDeviceSynchronize();
+		CHECK_CUDA(cudaDeviceSynchronize());
 	}
 	//CHECK_CUSPARSE(cusparseDestroy(handle));
 }
@@ -538,9 +538,13 @@ __global__ void clcprsrc(fluid* flu, process_variables* var, dyDir* dydir, int n
 	if (ic == nxp - 2) { ip = nxp - 1; iu = 0; }
 	if (kc == nzp - 2) { kp = nzp - 1; ku = 0; }
 
+	if (ic >= nxp || jc > nyp || kc >= nzp) {
+		return;
+	}
+
 	prsrc[d_Ord3(ic, jc, kc, nzp, nxp)].y = 0.0;
 
-	if (ic >= 0 && ic < nxp && jc >= 1 && jc < nyp && kc >= 0 && kc < nzp) {
+	if (jc >= 1 && jc < nyp) {
 		double dudx = dxcoe1 * flu[d_Ord3(im, jc, kc, nzp, nxp)].u +
 			dxcoe2 * flu[d_Ord3(ic, jc, kc, nzp, nxp)].u +
 			dxcoe3 * flu[d_Ord3(ip, jc, kc, nzp, nxp)].u +
@@ -753,7 +757,7 @@ __global__ void clcPPE(fluid* flu, process_variables* var, Ypara* ypara, double*
 
 }
 
-void clcPPE_1025(Ypara* ypara, double* ak1, double* ak3, cufftDoubleComplex* prsrc, double* a, double* b, double* c, double* d, double* e)
+void clcPPE_1025(Ypara* ypara, double* ak1, double* ak3, cufftDoubleComplex* prsrc, double* a, double* b, double* c, double* d, double* e, double* tri_vecm, double* tri_arrmn)
 {
 	for (int k = 0; k < nzp; k++)
 	{
@@ -771,11 +775,11 @@ void clcPPE_1025(Ypara* ypara, double* ak1, double* ak3, cufftDoubleComplex* prs
 		//CHECK_CUDA(cudaMalloc(&buffer2, bufferSize));
 		//CHECK_CUSPARSE(cusparseDgtsv2StridedBatch(handle, nyc, a, b, c, e, nxp, nyc, buffer2));
 		//CHECK_CUDA(cudaFree(buffer2));
-		InverseTridiagonalDevice(nxp, nyc, a, b, c, d);
-		InverseTridiagonalDevice(nxp, nyc, a, b, c, e);
+		InverseTridiagonalDevice(nxp, nyc, a, b, c, d, tri_vecm, tri_arrmn);
+		InverseTridiagonalDevice(nxp, nyc, a, b, c, e, tri_vecm, tri_arrmn);
 
 		clcPPE_update << <nyc, nxp >> > (prsrc, d, e, k);
-		cudaDeviceSynchronize();
+		CHECK_CUDA(cudaDeviceSynchronize());
 	}
 }
 
@@ -859,10 +863,9 @@ __global__ void update_velocity(fluid* flu, dyDir* dydir, RK* rk, int ns, cufftD
 	if (ic == nxp - 2) { ip = nxp - 1; iu = 0; }
 	if (kc == nzp - 2) { kp = nzp - 1; ku = 0; }
 
-	double sucac = dydir[jc].rdyc;
-	double dpdy = 0.0;
-
 	if (kc < nzp && jc <= nyc && ic < nxp) {
+		double sucac = dydir[jc].rdyc;
+		double dpdy = 0.0;
 		double dpdx = dxcoe1 * prsrc[d_Ord3(is, jc, kc, nzp, nxp)].x +
 			dxcoe2 * prsrc[d_Ord3(im, jc, kc, nzp, nxp)].x +
 			dxcoe3 * prsrc[d_Ord3(ic, jc, kc, nzp, nxp)].x +
@@ -910,10 +913,9 @@ __global__ void update_v_dir_velocity(fluid* flu, dyDir* dydir, RK* rk, int ns, 
 	//if (ic == nxp - 2) { ip = nxp - 1; iu = 0; }
 	//if (kc == nzp - 2) { kp = nzp - 1; ku = 0; }
 
-	double sucac = dydir[jc].rdyc;
-	double dpdy = 0.0;
-
 	if (kc < nzp && jc <= nyc && ic < nxp) {
+		double sucac = dydir[jc].rdyc;
+		double dpdy = 0.0;
 
 		dpdy = (prsrc[d_Ord3(ic, jc, kc, nzp, nxp)].x - prsrc[d_Ord3(ic, jm, kc, nzp, nxp)].x) * sucac;
 
@@ -943,15 +945,14 @@ __global__ void update_pressure(fluid* flu, Ypara* ypara, RK* rk, int ns, cufftD
 	if (kc == nzp - 2) { kp = nzp - 1; ku = 0; }
 	if (ic == nxp - 2) { ip = nxp - 1; iu = 0; }
 
-	double betap = -0.5 * rk[ns].alpha * nu * ypara[jc].ap2ph;
-	double betac = -0.5 * rk[ns].alpha * nu * ypara[jc].ac2ph + 1.0;
-	double betam = -0.5 * rk[ns].alpha * nu * ypara[jc].am2ph;
-
 	//if (kc == 100 && ic == 100) {
 	//	printf("i %d: k[%d] = %f, %f\n", ic, kc, prsrc[d_Ord3(ic, jc, kc, nzp, nxp)].x, prsrc[d_Ord3(ic, jc, kc, nzp, nxp)].y);
 	//}
 
 	if (kc < nzp && jc <= (nyp - 1) && ic < nxp) {
+		double betap = -0.5 * rk[ns].alpha * nu * ypara[jc].ap2ph;
+		double betac = -0.5 * rk[ns].alpha * nu * ypara[jc].ac2ph + 1.0;
+		double betam = -0.5 * rk[ns].alpha * nu * ypara[jc].am2ph;
 		flu[d_Ord3(ic, jc, kc, nzp, nxp)].p = flu[d_Ord3(ic, jc, kc, nzp, nxp)].p + (betap * prsrc[d_Ord3(ic, jp, kc, nzp, nxp)].x + betac * prsrc[d_Ord3(ic, jc, kc, nzp, nxp)].x + betam * prsrc[d_Ord3(ic, jm, kc, nzp, nxp)].x);
 	}
 
@@ -974,116 +975,6 @@ __global__ void bc_velocity(fluid* flu, double current_time)
 		double u_wall = U_osc * cos(omega * current_time) - uCRF;
 		flu[d_Ord3(ic, 0, kc, nzp, nxp)].u = 2.0 * u_wall - flu[d_Ord3(ic, 1, kc, nzp, nxp)].u;
 		flu[d_Ord3(ic, 0, kc, nzp, nxp)].w = -flu[d_Ord3(ic, 1, kc, nzp, nxp)].w;
-	}
-}
-
-__device__ double roughness_geometry_temporal_factor(double current_time)
-{
-	if (!enable_temporary_roughness_geometry) return 0.0;
-
-	double period = 2.0 * PI / omega;
-	double hold_time = roughness_geometry_hold_cycle * period;
-	double decay_time = roughness_geometry_decay_cycle * period;
-
-	if (current_time <= hold_time) return 1.0;
-	if (decay_time <= 0.0) return 0.0;
-	if (current_time >= hold_time + decay_time) return 0.0;
-
-	double s = (current_time - hold_time) / decay_time;
-	return 0.5 * (1.0 + cos(PI * s));
-}
-
-__device__ double roughness_geometry_height_at_x(double x, double current_time)
-{
-	double temporal = roughness_geometry_temporal_factor(current_time);
-	if (temporal <= 0.0) return 0.0;
-
-	double local_delta = sqrt(2.0 * nu / omega);
-	double height = roughness_geometry_height_delta * local_delta * temporal;
-	double length = roughness_geometry_length_delta * local_delta;
-	if (height <= 0.0 || length <= 0.0) return 0.0;
-
-	double Lx = nxp * dx;
-	double wall_displacement = (U_osc / omega) * sin(omega * current_time) - uCRF * current_time;
-	double center = roughness_geometry_center_x * Lx + wall_displacement;
-	double xr = x - center;
-	xr -= Lx * floor(xr / Lx + 0.5);
-
-	double half_length = 0.5 * length;
-	if (fabs(xr) > half_length) return 0.0;
-
-	double xi = xr / half_length;
-	return 0.5 * height * (1.0 + cos(PI * xi));
-}
-
-__global__ void apply_temporary_roughness_geometry(fluid* flu, process_variables* var, dyDir* dydir, double current_time)
-{
-	int ic = blockIdx.x * blockDim.x + threadIdx.x;
-	int jc = blockIdx.y * blockDim.y + threadIdx.y + 1;
-	int kc = blockIdx.z * blockDim.z + threadIdx.z;
-
-	if (ic >= nxp || jc > nyc || kc >= nzp) return;
-
-	double x = ic * dx + 0.5 * dx;
-	double h = roughness_geometry_height_at_x(x, current_time);
-	if (h <= 0.0) return;
-
-	double u_wall = U_osc * cos(omega * current_time) - uCRF;
-	double y = dydir[jc].yc;
-	int id = d_Ord3(ic, jc, kc, nzp, nxp);
-
-	if (y <= h) {
-		flu[id].u = u_wall;
-		flu[id].v = 0.0;
-		flu[id].w = 0.0;
-		var[id].uold = 0.0;
-		var[id].vold = 0.0;
-		var[id].wold = 0.0;
-		var[id].rhsx = 0.0;
-		var[id].rhsy = 0.0;
-		var[id].rhsz = 0.0;
-		return;
-	}
-
-	bool first_fluid_above_trip = (jc == 1 || dydir[jc - 1].yc <= h);
-	if (first_fluid_above_trip && jc < nyc) {
-		int idp = d_Ord3(ic, jc + 1, kc, nzp, nxp);
-		double yp = dydir[jc + 1].yc;
-		double denom = yp - h;
-		double weight = 1.0;
-		if (denom > 1.0e-14) {
-			weight = (y - h) / denom;
-		}
-		if (weight < 0.0) weight = 0.0;
-		if (weight > 1.0) weight = 1.0;
-
-		flu[id].u = u_wall + weight * (flu[idp].u - u_wall);
-		flu[id].v = weight * flu[idp].v;
-		flu[id].w = weight * flu[idp].w;
-		var[id].uold = 0.0;
-		var[id].vold = 0.0;
-		var[id].wold = 0.0;
-	}
-}
-
-__global__ void apply_temporary_roughness_pressure(fluid* flu, dyDir* dydir, double current_time)
-{
-	int ic = blockIdx.x * blockDim.x + threadIdx.x;
-	int jc = blockIdx.y * blockDim.y + threadIdx.y + 1;
-	int kc = blockIdx.z * blockDim.z + threadIdx.z;
-
-	if (ic >= nxp || jc > nyc || kc >= nzp) return;
-
-	double x = ic * dx + 0.5 * dx;
-	double h = roughness_geometry_height_at_x(x, current_time);
-	if (h <= 0.0 || dydir[jc].yc > h) return;
-
-	int jf = jc + 1;
-	while (jf <= nyc && dydir[jf].yc <= h) {
-		jf++;
-	}
-	if (jf <= nyc) {
-		flu[d_Ord3(ic, jc, kc, nzp, nxp)].p = flu[d_Ord3(ic, jf, kc, nzp, nxp)].p;
 	}
 }
 
@@ -1147,28 +1038,17 @@ __global__ void BackwardSubstitution(int m, int n, double* fj, double* arrmn) {
 }
 
 // ��������ֻ���� GPU ����������
-void InverseTridiagonalDevice(int m, int n, double* aj, double* bj, double* cj, double* fj) {
-	// �����Ż�
-	double* d_vecm, * d_arrmn;
-
-	// �豸���ڴ���䣨������ֲ��м�����
-	cudaMalloc((void**)&d_vecm, m * sizeof(double));
-	cudaMalloc((void**)&d_arrmn, m * n * sizeof(double));
-
+void InverseTridiagonalDevice(int m, int n, double* aj, double* bj, double* cj, double* fj, double* vecm, double* arrmn) {
 	int threadsPerBlock = 1024;
 	int blocksPerGrid = (m + threadsPerBlock - 1) / threadsPerBlock;
 
 	// ǰ����ȥ
-	ForwardElimination << <blocksPerGrid, threadsPerBlock >> > (m, n, aj, bj, cj, fj, d_vecm, d_arrmn);
-	cudaDeviceSynchronize();
+	ForwardElimination << <blocksPerGrid, threadsPerBlock >> > (m, n, aj, bj, cj, fj, vecm, arrmn);
+	CHECK_CUDA(cudaDeviceSynchronize());
 
 	// ����ش�
-	BackwardSubstitution << <blocksPerGrid, threadsPerBlock >> > (m, n, fj, d_arrmn);
-	cudaDeviceSynchronize();
-
-	// �����豸���ڴ�
-	cudaFree(d_vecm);
-	cudaFree(d_arrmn);
+	BackwardSubstitution << <blocksPerGrid, threadsPerBlock >> > (m, n, fj, arrmn);
+	CHECK_CUDA(cudaDeviceSynchronize());
 }
 
 __global__ void average_xz(fluid* flu, dyDir* dydir, Stat* stat, int nx, int ny, int nz) {
@@ -1292,6 +1172,7 @@ void calcuate()
 	double* s3tot;
 
 	double* aa, * bb, * cc, * dd;
+	double* tri_vecm, * tri_arrmn;
 
 	double* pp; //for the image of prsrc
 
@@ -1301,31 +1182,33 @@ void calcuate()
 	//cudaMemcpy(s3tot, &zero, sizeof(double), cudaMemcpyHostToDevice);
 
 	CHECK_CUDA(cudaMalloc((void**)&s3tot, sizeof(double)));
-	CHECK_CUDA(cudaMallocManaged(&uxhx, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
-	CHECK_CUDA(cudaMallocManaged(&uyhx, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
-	CHECK_CUDA(cudaMallocManaged(&uzhx, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
-	CHECK_CUDA(cudaMallocManaged(&uxhz, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
-	CHECK_CUDA(cudaMallocManaged(&uyhz, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
-	CHECK_CUDA(cudaMallocManaged(&uzhz, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
+	CHECK_CUDA(cudaMalloc((void**)&uxhx, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
+	CHECK_CUDA(cudaMalloc((void**)&uyhx, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
+	CHECK_CUDA(cudaMalloc((void**)&uzhx, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
+	CHECK_CUDA(cudaMalloc((void**)&uxhz, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
+	CHECK_CUDA(cudaMalloc((void**)&uyhz, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
+	CHECK_CUDA(cudaMalloc((void**)&uzhz, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
 
 	CHECK_CUDA(cudaMalloc((void**)&aa, static_cast<size_t>(nxp) * static_cast<size_t>(nyc) * sizeof(double)));
 	CHECK_CUDA(cudaMalloc((void**)&bb, static_cast<size_t>(nxp) * static_cast<size_t>(nyc) * sizeof(double)));
 	CHECK_CUDA(cudaMalloc((void**)&cc, static_cast<size_t>(nxp) * static_cast<size_t>(nyc) * sizeof(double)));
 	CHECK_CUDA(cudaMalloc((void**)&dd, static_cast<size_t>(nxp) * static_cast<size_t>(nyc) * sizeof(double)));
 	CHECK_CUDA(cudaMalloc((void**)&pp, static_cast<size_t>(nxp) * static_cast<size_t>(nyc) * sizeof(double)));
+	CHECK_CUDA(cudaMalloc((void**)&tri_vecm, static_cast<size_t>(nxp) * sizeof(double)));
+	CHECK_CUDA(cudaMalloc((void**)&tri_arrmn, static_cast<size_t>(nxp) * static_cast<size_t>(nyc) * sizeof(double)));
 
 	double* divmax;
-	cudaMalloc((void**)&divmax, sizeof(double));
+	CHECK_CUDA(cudaMalloc((void**)&divmax, sizeof(double)));
 
-	cudaMalloc(&ak1, static_cast<size_t>(nxp) * sizeof(double));
-	cudaMalloc(&ak3, static_cast<size_t>(nzp) * sizeof(double));
+	CHECK_CUDA(cudaMalloc((void**)&ak1, static_cast<size_t>(nxp) * sizeof(double)));
+	CHECK_CUDA(cudaMalloc((void**)&ak3, static_cast<size_t>(nzp) * sizeof(double)));
 	initPPE(ak1, ak3);//�޵�����ȥ
 
 	cufftHandle plan;
 	int nn[2];
 	nn[0] = nzp;
 	nn[1] = nxp;
-	cufftPlanMany(&plan, 2, nn, NULL, 1, nxp * nzp, NULL, 1, nxp * nzp, CUFFT_Z2Z, nyp + 1);
+	CHECK_CUFFT(cufftPlanMany(&plan, 2, nn, NULL, 1, nxp * nzp, NULL, 1, nxp * nzp, CUFFT_Z2Z, nyp + 1));
 
 	dim3 blockDim(8, 8, 8); // ÿ���߳̿��е��߳���
 	dim3 gridDim((nxp + blockDim.x - 1) / blockDim.x,
@@ -1342,11 +1225,9 @@ void calcuate()
 
 	start = clock();
 	bc_velocity << < nzp, nxp >> > (flu, 0.0);
-	apply_temporary_roughness_geometry << < gridDim, blockDim >> > (flu, var, dydir_device, 0.0);
-	bc_velocity << < nzp, nxp >> > (flu, 0.0);
-	cudaDeviceSynchronize();
+	CHECK_CUDA(cudaDeviceSynchronize());
 
-	for (int t = 0; t <= timemax; t++)
+	for (int t = 0; t < timemax; t++)
 	{
         // 计算当前物理时间，用于传递给含时边界
 		double t_stage_start = t * dt;
@@ -1370,11 +1251,11 @@ void calcuate()
 			rhsx << < gridDim, blockDim >> > (flu, var, dydir_device, ypara_device, uxhx, uyhx, uzhx, uxhz, uyhz, uzhz, ns, s3tot, rk_device);
 			rhsy << < gridDim, blockDim >> > (flu, var, dydir_device, ypara_device, uxhx, uyhx, uzhx, uxhz, uyhz, uzhz, ns, rk_device);
 			rhsz << < gridDim, blockDim >> > (flu, var, dydir_device, ypara_device, uxhx, uyhx, uzhx, uxhz, uyhz, uzhz, ns, rk_device);
-			cudaDeviceSynchronize();
+			CHECK_CUDA(cudaDeviceSynchronize());
 
 			correct_rhsx << < gridDim, blockDim >> > (flu, var, dydir_device, ypara_device, s3tot, ns, rk_device);
 
-			cudaDeviceSynchronize();
+			CHECK_CUDA(cudaDeviceSynchronize());
 			//for (int k = 0; k < nzp; k++)
 			//{
 			//	uhat_coe << <nyc, nxp >> > (var, ypara_device, ns, aa, bb, cc, dd, k, rk_device); cudaDeviceSynchronize();
@@ -1393,15 +1274,13 @@ void calcuate()
 			//}
 
             /*修改真实速度*/
-			uhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, rk_device, dU_wall);
+			uhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, rk_device, dU_wall, tri_vecm, tri_arrmn);
 			/*修改真实速度*/
-			what_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, rk_device);
-			vhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, rk_device);
+			what_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, rk_device, tri_vecm, tri_arrmn);
+			vhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, rk_device, tri_vecm, tri_arrmn);
 
 			bc_velocity << < nzp, nxp >> > (flu, t_next);
-			apply_temporary_roughness_geometry << < gridDim, blockDim >> > (flu, var, dydir_device, t_next);
-			bc_velocity << < nzp, nxp >> > (flu, t_next);
-			cudaDeviceSynchronize();
+			CHECK_CUDA(cudaDeviceSynchronize());
 
 			/*吹吸边界条件*/
             /*
@@ -1411,18 +1290,18 @@ void calcuate()
 			
 
 			/*PPE*/
-			cudaMemcpy(divmax, &zero, sizeof(double), cudaMemcpyHostToDevice);
+			CHECK_CUDA(cudaMemcpy(divmax, &zero, sizeof(double), cudaMemcpyHostToDevice));
 
 
 			clcprsrc << < gridDim, blockDim >> > (flu, var, dydir_device, ns, divmax, rk_device, prsrc);
 
-			CHECK_CUFFT(cufftExecZ2Z(plan, (cufftDoubleComplex*)prsrc, (cufftDoubleComplex*)prsrc, CUFFT_FORWARD)); cudaDeviceSynchronize();
+			CHECK_CUFFT(cufftExecZ2Z(plan, (cufftDoubleComplex*)prsrc, (cufftDoubleComplex*)prsrc, CUFFT_FORWARD)); CHECK_CUDA(cudaDeviceSynchronize());
 
-			clcPPE_1025(ypara_device, ak1, ak3, prsrc, aa, bb, cc, dd, pp);
+			clcPPE_1025(ypara_device, ak1, ak3, prsrc, aa, bb, cc, dd, pp, tri_vecm, tri_arrmn);
 
 			//clcPPE << < nzp, nxp >> > (flu, var, ypara_device, ak1, ak3, prsrc); cudaDeviceSynchronize();
 
-			CHECK_CUFFT(cufftExecZ2Z(plan, (cufftDoubleComplex*)prsrc, (cufftDoubleComplex*)prsrc, CUFFT_INVERSE)); cudaDeviceSynchronize();
+			CHECK_CUFFT(cufftExecZ2Z(plan, (cufftDoubleComplex*)prsrc, (cufftDoubleComplex*)prsrc, CUFFT_INVERSE)); CHECK_CUDA(cudaDeviceSynchronize());
 			bc_prsrc << < nzp, nxp >> > (prsrc);
 			/*PPE*/
 
@@ -1431,15 +1310,12 @@ void calcuate()
 			/*update*/
 			update_velocity << < gridDim, blockDim >> > (flu, dydir_device, rk_device, ns, prsrc);
 			//update_v_dir_velocity << < gridDim, blockDim >> > (flu, dydir_device, rk_device, ns, prsrc);
-			update_pressure << < gridDim, blockDim >> > (flu, ypara_device, rk_device, ns, prsrc); cudaDeviceSynchronize();
+			update_pressure << < gridDim, blockDim >> > (flu, ypara_device, rk_device, ns, prsrc); CHECK_CUDA(cudaDeviceSynchronize());
 
-			bc_presure << < nzp, nxp >> > (flu); cudaDeviceSynchronize();
-			apply_temporary_roughness_pressure << < gridDim, blockDim >> > (flu, dydir_device, t_next);
+			bc_presure << < nzp, nxp >> > (flu); CHECK_CUDA(cudaDeviceSynchronize());
 
 			bc_velocity << < nzp, nxp >> > (flu, t_next);
-			apply_temporary_roughness_geometry << < gridDim, blockDim >> > (flu, var, dydir_device, t_next);
-			bc_velocity << < nzp, nxp >> > (flu, t_next);
-			cudaDeviceSynchronize();
+			CHECK_CUDA(cudaDeviceSynchronize());
 
 			/*update*/
 
@@ -1451,19 +1327,24 @@ void calcuate()
 		}
 
 
-		printf("%d     prgrad= %f \n", t, prgradaver);
+		const int completed_step = t + 1;
+		const double completed_time = completed_step * dt;
+
+		if (completed_step % stat_output_interval == 0) {
+			printf("%d     prgrad= %f \n", completed_step, prgradaver);
+		}
 #ifdef  Restart
 		if (t % 1 == 0)
 		{
 			output_prgrad(prgradaver);
 			prgradaver = 0.0;
 		}
-		if (t % 10 == 0 && t <= timemax && t > 0)
+		if (completed_step % stat_output_interval == 0)
 		{
 			//output_velocity(flu, flu_host, t);
-			clcstat(flu, (t + 1) * dt, t);
+			clcstat(flu, completed_time, completed_step);
 		}
-		if (t != 0 && t % 5000 == 0 && t <= timemax)
+		if (completed_step % 5000 == 0 || completed_step == timemax)
 		{
 			//output_velocity(flu, flu_host, t);
 			output_restart(flu, flu_host, var);
@@ -1478,11 +1359,11 @@ void calcuate()
 		//{
 		//	output_velocity(flu, flu_host, t);
 		//}
-		if (t % 5 == 0 && t <= timemax)
+		if (completed_step % stat_output_interval == 0)
 		{
-			clcstat(flu, (t + 1) * dt, t);
+			clcstat(flu, completed_time, completed_step);
 		}
-		if (t != 0 && t % 5000 == 0 && t <= timemax)
+		if (completed_step % 5000 == 0 || completed_step == timemax)
 		{
 			//output_velocity(flu, flu_host, t);
 			output_restart(flu, flu_host, var);
@@ -1497,17 +1378,24 @@ void calcuate()
 	//output for restart
 
 
-	cudaFree(uxhx);
-	cudaFree(uyhx);
-	cudaFree(uzhx);
-	cudaFree(uxhz);
-	cudaFree(uyhz);
-	cudaFree(uzhz);
-	cudaFree(aa);
-	cudaFree(bb);
-	cudaFree(cc);
-	cudaFree(dd);
-	cudaFree(pp);
+	CHECK_CUDA(cudaFree(uxhx));
+	CHECK_CUDA(cudaFree(uyhx));
+	CHECK_CUDA(cudaFree(uzhx));
+	CHECK_CUDA(cudaFree(uxhz));
+	CHECK_CUDA(cudaFree(uyhz));
+	CHECK_CUDA(cudaFree(uzhz));
+	CHECK_CUDA(cudaFree(s3tot));
+	CHECK_CUDA(cudaFree(aa));
+	CHECK_CUDA(cudaFree(bb));
+	CHECK_CUDA(cudaFree(cc));
+	CHECK_CUDA(cudaFree(dd));
+	CHECK_CUDA(cudaFree(pp));
+	CHECK_CUDA(cudaFree(tri_vecm));
+	CHECK_CUDA(cudaFree(tri_arrmn));
+	CHECK_CUDA(cudaFree(divmax));
+	CHECK_CUDA(cudaFree(ak1));
+	CHECK_CUDA(cudaFree(ak3));
+	CHECK_CUFFT(cufftDestroy(plan));
 }
 
 

@@ -16,6 +16,17 @@
 #include "src/init.cuh"
 #include "src/rhs.cuh"
 
+static FILE* open_file_checked(const char* filename, const char* mode)
+{
+	FILE* fp = nullptr;
+	fopen_s(&fp, filename, mode);
+	if (fp == nullptr) {
+		fprintf(stderr, "Failed to open file: %s\n", filename);
+		exit(EXIT_FAILURE);
+	}
+	return fp;
+}
+
 void init_mesh_para()
 {
 	memset(ypara_host, 0, (static_cast<size_t>(nyp) + 1) * sizeof(Ypara));
@@ -24,7 +35,7 @@ void init_mesh_para()
 
 	/* 单侧双曲正切(tanh)非均匀网格划分：仅在底部(y=0)极度加密 */
 	// double gamma_mesh = 3.5; 
-	double gamma_mesh = 4.5; 
+	double gamma_mesh = 4.0; 
 	for (int j = 1; j <= nyp; j++)
 	{
 		double xi = (double(j) - 1.0) / nyc; 
@@ -131,9 +142,9 @@ void init_mesh_para()
 	CHECK_CUDA(cudaMalloc((void**)&ypara_device, (nyp + 1) * sizeof(Ypara)));
 	CHECK_CUDA(cudaMalloc((void**)&dydir_device, (nyp + 1) * sizeof(dyDir)));
 	CHECK_CUDA(cudaMalloc((void**)&rk_device, 3 * sizeof(RK)));
-	cudaMemcpy(ypara_device, ypara_host, (nyp + 1) * sizeof(Ypara), cudaMemcpyHostToDevice);
-	cudaMemcpy(dydir_device, dydir, (nyp + 1) * sizeof(dyDir), cudaMemcpyHostToDevice);
-	cudaMemcpy(rk_device, rk, 3 * sizeof(RK), cudaMemcpyHostToDevice);
+	CHECK_CUDA(cudaMemcpy(ypara_device, ypara_host, (nyp + 1) * sizeof(Ypara), cudaMemcpyHostToDevice));
+	CHECK_CUDA(cudaMemcpy(dydir_device, dydir, (nyp + 1) * sizeof(dyDir), cudaMemcpyHostToDevice));
+	CHECK_CUDA(cudaMemcpy(rk_device, rk, 3 * sizeof(RK), cudaMemcpyHostToDevice));
 }
 
 void init_fluid(fluid* flu)
@@ -296,7 +307,7 @@ void init_fluid(fluid* flu)
 	sprintf_s(flu_name, "mesh.dat");
 	sprintf_s(filename, output_path);
 	strcat_s(filename, flu_name);
-	fopen_s(&fp, filename, "w+");
+	fp = open_file_checked(filename, "w+");
 
 	for (ic = 0; ic < nxp; ic = ic + xskip) { fprintf(fp, "%e\n", ic * dx); }
 	for (jc = 0; jc <= nyp; jc = jc + yskip) { fprintf(fp, "%e\n", dydir[jc].yc); }
@@ -316,7 +327,7 @@ void output_velocity(fluid* flu, fluid* flu_host, int t)
 	int xyzsize = nxp * (nyp + 1) * nzp;
 
 	//fluid* flu_host = (fluid*)malloc(xyzsize * sizeof(fluid));
-	cudaMemcpy(flu_host, flu, xyzsize * sizeof(fluid), cudaMemcpyDeviceToHost);
+	CHECK_CUDA(cudaMemcpy(flu_host, flu, xyzsize * sizeof(fluid), cudaMemcpyDeviceToHost));
 
 	FILE* fp = NULL;//�ļ�ָ��
 	char filename[100];//�ļ���
@@ -330,14 +341,14 @@ void output_velocity(fluid* flu, fluid* flu_host, int t)
 
 	sprintf_s(filename, output_path);
 	strcat_s(filename, flu_name);
-	fopen_s(&fp, filename, "w+");
+	fp = open_file_checked(filename, "w+");
 
 	for (jc = 0; jc <= nyp; jc = jc + yskip)
 		for (kc = 0; kc < nzp; kc = kc + zskip)
 			for (ic = 0; ic < nxp; ic = ic + xskip)
 			{
 				//fprintf(fp, "%d %d %e %e %d\n", flu[i].x, flu[i].y, flu[i].ux, flu[i].uy, flu[i].type);
-				fprintf(fp, "%e %e %e %e\n", flu_host[Ord3(ic, jc, kc, nzp, nxp)].u, flu_host[Ord3(ic, jc, kc, nzp, nxp)].v, flu_host[Ord3(ic, jc, kc, nzp, nxp)].w, flu_host[Ord3(ic, jc, kc, nzp, nxp)].p);
+				fprintf(fp, "%.15e %.15e %.15e %.15e\n", flu_host[Ord3(ic, jc, kc, nzp, nxp)].u, flu_host[Ord3(ic, jc, kc, nzp, nxp)].v, flu_host[Ord3(ic, jc, kc, nzp, nxp)].w, flu_host[Ord3(ic, jc, kc, nzp, nxp)].p);
 				//fprintf(fp, "%e %e %e\n", ic * dx, dydir[jc].yc, kc * dz);
 			}
 	fclose(fp);
@@ -372,7 +383,7 @@ void output_prgrad(double prgradaver)
 	sprintf_s(flu_name, "prgrad.dat");
 	sprintf_s(filename, output_path);
 	strcat_s(filename, flu_name);
-	fopen_s(&fp, filename, "a+");
+	fp = open_file_checked(filename, "a+");
 
 	fprintf(fp, "%e\n", prgradaver);
 
@@ -384,9 +395,9 @@ void output_restart(fluid* flu, fluid* flu_host, process_variables* var)
 	int ic, jc, kc;
 	int xyzsize = nxp * (nyp + 1) * nzp;
 
-	cudaMemcpy(flu_host, flu, xyzsize * sizeof(fluid), cudaMemcpyDeviceToHost);
+	CHECK_CUDA(cudaMemcpy(flu_host, flu, xyzsize * sizeof(fluid), cudaMemcpyDeviceToHost));
 	process_variables* var_for_output = (process_variables*)malloc(xyzsize * sizeof(process_variables));
-	cudaMemcpy(var_for_output, var, xyzsize * sizeof(process_variables), cudaMemcpyDeviceToHost);
+	CHECK_CUDA(cudaMemcpy(var_for_output, var, xyzsize * sizeof(process_variables), cudaMemcpyDeviceToHost));
 
 
 	FILE* fp = NULL;//�ļ�ָ��
@@ -396,13 +407,13 @@ void output_restart(fluid* flu, fluid* flu_host, process_variables* var)
 	sprintf_s(flu_name, "restart.dat");
 	sprintf_s(filename, output_path);
 	strcat_s(filename, flu_name);
-	fopen_s(&fp, filename, "w+");
+	fp = open_file_checked(filename, "w+");
 
 	for (jc = 0; jc <= nyp; jc = jc + yskip)
 		for (kc = 0; kc < nzp; kc = kc + zskip)
 			for (ic = 0; ic < nxp; ic = ic + xskip)
 			{
-				fprintf(fp, "%e %e %e %e %e %e %e\n", flu_host[Ord3(ic, jc, kc, nzp, nxp)].u, flu_host[Ord3(ic, jc, kc, nzp, nxp)].v, flu_host[Ord3(ic, jc, kc, nzp, nxp)].w, flu_host[Ord3(ic, jc, kc, nzp, nxp)].p, var_for_output[Ord3(ic, jc, kc, nzp, nxp)].uold, var_for_output[Ord3(ic, jc, kc, nzp, nxp)].vold, var_for_output[Ord3(ic, jc, kc, nzp, nxp)].wold);
+				fprintf(fp, "%.15e %.15e %.15e %.15e %.15e %.15e %.15e\n", flu_host[Ord3(ic, jc, kc, nzp, nxp)].u, flu_host[Ord3(ic, jc, kc, nzp, nxp)].v, flu_host[Ord3(ic, jc, kc, nzp, nxp)].w, flu_host[Ord3(ic, jc, kc, nzp, nxp)].p, var_for_output[Ord3(ic, jc, kc, nzp, nxp)].uold, var_for_output[Ord3(ic, jc, kc, nzp, nxp)].vold, var_for_output[Ord3(ic, jc, kc, nzp, nxp)].wold);
 			}
 	fclose(fp);
 
@@ -411,10 +422,12 @@ void output_restart(fluid* flu, fluid* flu_host, process_variables* var)
 
 void init_restart(fluid* flu, fluid* flu_host, process_variables* var)
 {
-	std::ifstream file("E:\\lch\\restart.dat");  // ���ļ�
+	char filename[100];
+	sprintf_s(filename, "%srestart.dat", output_path);
+	std::ifstream file(filename);
 	if (!file) {
-		std::cerr << "Unable to open file: " << std::endl;
-		return;
+		std::cerr << "Unable to open restart file: " << filename << std::endl;
+		exit(EXIT_FAILURE);
 	}
 
 	int ic, jc, kc;
@@ -435,8 +448,8 @@ void init_restart(fluid* flu, fluid* flu_host, process_variables* var)
 					>> var_for_input[Ord3(ic, jc, kc, nzp, nxp)].wold)
 					)
 				{
-					std::cerr << "Error reading data" << std::endl;
-					break;  // �ļ������ݲ���ʱ��ǰ�˳�
+					std::cerr << "Error reading restart data: " << filename << std::endl;
+					exit(EXIT_FAILURE);
 				}
 			}
 
@@ -538,7 +551,7 @@ void clcstat(fluid* flu, double current_time, int time_step)
 
 	sprintf_s(filename, output_path);
 	strcat_s(filename, flu_name);
-	fopen_s(&fp, filename, "a+");// “a+”追加读写
+	fp = open_file_checked(filename, "a+");// “a+”追加读写
 
 	for (int ii = 0; ii < 11; ii++) {
 		for (jc = 1; jc < nyp; jc++)
@@ -576,7 +589,7 @@ void clcstat(fluid* flu, double current_time, int time_step)
 	sprintf_s(flu_name, "tau_wall.dat");
 	sprintf_s(filename, output_path);
 	strcat_s(filename, flu_name);
-	fopen_s(&fp, filename, "a+");
+	fp = open_file_checked(filename, "a+");
 
 	double y1 = dydir[1].yc;
 	double y2 = dydir[2].yc;
@@ -598,7 +611,7 @@ void clcstat(fluid* flu, double current_time, int time_step)
 		sprintf_s(flu_name, "tau_wall_map_%08d.dat", time_step);
 		sprintf_s(filename, output_path);
 		strcat_s(filename, flu_name);
-		fopen_s(&fp, filename, "w+");
+		fp = open_file_checked(filename, "w+");
 
 		fprintf(fp, "%.15e %.15e %d %d\n", current_time, u_wall, nxp, nzp);
 		for (int kc = 0; kc < nzp; kc++)
