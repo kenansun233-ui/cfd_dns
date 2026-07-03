@@ -972,7 +972,7 @@ __global__ void bc_velocity(fluid* flu, double current_time)
 
 		// 底部：Stokes震荡壁面
 		flu[d_Ord3(ic, 1, kc, nzp, nxp)].v = 0.0; 
-		double u_wall = U_osc * cos(omega * current_time) - uCRF;
+		double u_wall = U_osc * sin(omega * current_time) - uCRF;
 		flu[d_Ord3(ic, 0, kc, nzp, nxp)].u = 2.0 * u_wall - flu[d_Ord3(ic, 1, kc, nzp, nxp)].u;
 		flu[d_Ord3(ic, 0, kc, nzp, nxp)].w = -flu[d_Ord3(ic, 1, kc, nzp, nxp)].w;
 	}
@@ -1240,8 +1240,8 @@ void calcuate()
             double t_next    = t_current + rk[ns].alpha;
 
             // 分别计算当前时刻和下一时刻的物理壁面速度
-            double u_wall_current = U_osc * cos(omega * t_current) - uCRF;
-            double u_wall_next = U_osc * cos(omega * t_next) - uCRF;
+            double u_wall_current = U_osc * sin(omega * t_current) - uCRF;
+            double u_wall_next = U_osc * sin(omega * t_next) - uCRF;
             
             // 求出在这一个极小的 RK 子步内的速度增量
             double dU_wall = u_wall_next - u_wall_current;

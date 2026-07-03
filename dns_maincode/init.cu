@@ -287,7 +287,7 @@ void init_fluid(fluid* flu)
 			flu[Ord3(ic, nyp, kc, nzp, nxp)].w = flu[Ord3(ic, nyc, kc, nzp, nxp)].w;
 			flu[Ord3(ic, nyp, kc, nzp, nxp)].v = 0.0;  
 
-			double initial_u_wall = U_osc * cos(0.0) - uCRF;
+			double initial_u_wall = U_osc * sin(0.0) - uCRF;
 			flu[Ord3(ic, 0, kc, nzp, nxp)].u = 2.0 * initial_u_wall - flu[Ord3(ic, 1, kc, nzp, nxp)].u;
 			flu[Ord3(ic, 0, kc, nzp, nxp)].w = -flu[Ord3(ic, 1, kc, nzp, nxp)].w;
 			flu[Ord3(ic, 1, kc, nzp, nxp)].v = 0.0;   
@@ -596,7 +596,7 @@ void clcstat(fluid* flu, double current_time, int time_step)
 	double c0 = (y1 + y2) / (y1 * y2);
 	double c1 = -y2 / (y1 * (y2 - y1));
 	double c2 = y1 / (y2 * (y2 - y1));
-	double u_wall = U_osc * cos(omega * current_time) - uCRF;
+	double u_wall = U_osc * sin(omega * current_time) - uCRF;
 	double tau_fd2 = nu * (c0 * u_wall + c1 * stat[1].um + c2 * stat[2].um);
 
 	fprintf(fp, "%.15e %.15e %.15e %.15e %.15e\n",
