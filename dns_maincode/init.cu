@@ -9,6 +9,7 @@
 #include <fstream>   
 #include "device_launch_parameters.h"
 #include <direct.h>
+#include <io.h>
 
 #include <random>
 
@@ -26,6 +27,8 @@ static FILE* open_file_checked(const char* filename, const char* mode)
 	}
 	return fp;
 }
+
+int restart_start_step = 0;
 
 void init_mesh_para()
 {
@@ -390,23 +393,23 @@ void output_prgrad(double prgradaver)
 	fclose(fp);
 }
 
-void output_restart(fluid* flu, fluid* flu_host, process_variables* var)
+void output_restart(fluid* flu, fluid* flu_host, process_variables* var, int time_step)
 {
 	int ic, jc, kc;
 	int xyzsize = nxp * (nyp + 1) * nzp;
 
 	CHECK_CUDA(cudaMemcpy(flu_host, flu, xyzsize * sizeof(fluid), cudaMemcpyDeviceToHost));
 	process_variables* var_for_output = (process_variables*)malloc(xyzsize * sizeof(process_variables));
+	if (var_for_output == nullptr) {
+		fprintf(stderr, "Failed to allocate restart host buffer.\n");
+		exit(EXIT_FAILURE);
+	}
 	CHECK_CUDA(cudaMemcpy(var_for_output, var, xyzsize * sizeof(process_variables), cudaMemcpyDeviceToHost));
 
-
 	FILE* fp = NULL;//�ļ�ָ��
-	char filename[100];//�ļ���
-	char flu_name[100];
+	char filename[200];//�ļ���
 
-	sprintf_s(flu_name, "restart.dat");
-	sprintf_s(filename, output_path);
-	strcat_s(filename, flu_name);
+	sprintf_s(filename, sizeof(filename), "%srestart_%08d.dat", output_path, time_step);
 	fp = open_file_checked(filename, "w+");
 
 	for (jc = 0; jc <= nyp; jc = jc + yskip)
@@ -420,10 +423,49 @@ void output_restart(fluid* flu, fluid* flu_host, process_variables* var)
 	free(var_for_output);
 }
 
+static void find_restart_file(char* filename, size_t filename_size)
+{
+	if (restart_input_step >= 0) {
+		restart_start_step = restart_input_step;
+		sprintf_s(filename, filename_size, "%srestart_%08d.dat", output_path, restart_input_step);
+		return;
+	}
+
+	char pattern[200];
+	sprintf_s(pattern, sizeof(pattern), "%srestart_*.dat", output_path);
+
+	struct _finddata_t fileinfo;
+	intptr_t handle = _findfirst(pattern, &fileinfo);
+	int latest_step = -1;
+	char latest_name[100] = "";
+
+	if (handle != -1) {
+		do {
+			int step = -1;
+			if (sscanf_s(fileinfo.name, "restart_%d.dat", &step) == 1 && step > latest_step) {
+				latest_step = step;
+				sprintf_s(latest_name, sizeof(latest_name), "%s", fileinfo.name);
+			}
+		} while (_findnext(handle, &fileinfo) == 0);
+		_findclose(handle);
+	}
+
+	if (latest_step >= 0) {
+		restart_start_step = latest_step;
+		sprintf_s(filename, filename_size, "%s%s", output_path, latest_name);
+	}
+	else {
+		restart_start_step = 0;
+		sprintf_s(filename, filename_size, "%srestart.dat", output_path);
+	}
+}
+
 void init_restart(fluid* flu, fluid* flu_host, process_variables* var)
 {
-	char filename[100];
-	sprintf_s(filename, "%srestart.dat", output_path);
+	char filename[200];
+	find_restart_file(filename, sizeof(filename));
+	std::cout << "Reading restart file: " << filename
+		<< " (restart_start_step = " << restart_start_step << ")" << std::endl;
 	std::ifstream file(filename);
 	if (!file) {
 		std::cerr << "Unable to open restart file: " << filename << std::endl;

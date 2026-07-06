@@ -94,6 +94,8 @@ int main()
     fprintf(run_info, "stat_output_dt %.15e\n", stat_output_dt);
     fprintf(run_info, "tau_wall_map_interval %d\n", tau_wall_map_interval);
     fprintf(run_info, "tau_wall_map_output_dt %.15e\n", tau_wall_map_output_dt);
+    fprintf(run_info, "restart_output_interval %d\n", restart_output_interval);
+    fprintf(run_info, "restart_input_step %d\n", restart_input_step);
 #ifdef Restart
     fprintf(run_info, "Restart 1\n");
 #else
@@ -121,17 +123,21 @@ int main()
 #else 
     init_fluid(flu_host);
 #endif
+
+    fopen_s(&run_info, run_info_name, "a+");
+    if (run_info == nullptr)
+    {
+        fprintf(stderr, "Failed to open file: %s\n", run_info_name);
+        exit(EXIT_FAILURE);
+    }
+    fprintf(run_info, "restart_start_step %d\n", restart_start_step);
+    fclose(run_info);
  
     CHECK_CUDA(cudaMemcpy(flu, flu_host, nxp * (nyp + 1) * nzp * sizeof(fluid), cudaMemcpyHostToDevice));
 
 
     calcuate();
-#ifdef Output_Restart
-    output_restart(flu, flu_host, var);   
-#endif 
- 
 
-Error:
     CHECK_CUDA(cudaFree(flu));
     CHECK_CUDA(cudaFree(var));
     CHECK_CUDA(cudaFree(prsrc));

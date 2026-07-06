@@ -25,13 +25,16 @@ struct process_variables
 	double rhsy;
 	double rhsz;
 
-	// Cached interpolation fields were moved to separate work arrays.
-	// double uxhx;
-	// double uyhx;
-	// double uzhx;
-	// double uxhz;
-	// double uyhz;
-	// double uzhz;
+	//cufftDoubleComplex* prsrc;
+	//double prsrc;
+
+	/*想办法优化*/
+	//double uxhx;
+	//double uyhx;
+	//double uzhx;
+	//double uxhz;
+	//double uyhz;
+	//double uzhz;
 };
 
 struct Ypara //y-dir interpolation para and the number =1:nyc
@@ -86,66 +89,118 @@ extern cufftDoubleComplex* prsrc;
 //#define Restart
 #define Output_Restart
 
+/* Retau = 1000 */
+//constexpr double ubulk = 1.000000000;
+//constexpr double nu = 5.00000E-05;
+//constexpr double PI = 3.14159265358979323846264338327950288;
+//constexpr double uCRF = 1.000000000;  //参考系速度
+// 
+//constexpr double xlength = 6.283185307;
+//constexpr double ylength = 2.0;
+//constexpr double zlength = 3.141592654;
+//
+//constexpr int nxp = 576;
+//constexpr int nyp = 383;
+//constexpr int nzp = 576;
+/* Retau = 1000 */
+
+/* Retau = 180 */
+//constexpr double ubulk = 0.6666666666666666666666667;
+////constexpr double ubulk = 0.333333333333333333333333333333;
+//constexpr double nu = 2.3310E-4;
+//constexpr double PI = 3.14159265358979323846264338327950288;
+//constexpr double uCRF = 0.6666666666666666666666667;  //参考系速度,若壁面静止则为0；流体相对静止则为ubulk
+//
+//constexpr double xlength = 12.56637061;
+//constexpr double ylength = 2.0;
+//constexpr double zlength = 6.283185307;
+//
+//constexpr int nxp = 384;
+//constexpr int nyp = 191;
+//constexpr int nzp = 256;
+/* Retau = 180 */
+
+
 constexpr double PI = 3.14159265358979323846264338327950288;
+
 
 // ==============================================================================
 // 物理模拟控制开关 (通过注释切换)
 // ==============================================================================
 #define ZERO_CROSS_FLOW 
-
-// --- Stokes 震荡底壁控制参数 ---
 // 当前算例: Re_omega = 1.0e5
 // 定义:
 // Re_omega = U_osc^2 / (omega * nu)
 // Re_delta = U_osc * sqrt(2.0 * nu / omega) / nu = sqrt(2.0 * Re_omega)
 // stokes_delta = sqrt(2.0 * nu / omega)
 // 若切换 Re_omega，请同步修改 U_osc、Re_delta、dt、simulation_cycles、timemax 和输出间隔。
-constexpr double Re_omega = 100000.0;  // Re_omega = U_osc^2 / (omega * nu)
+constexpr double Re_omega = 100.0;  // Re_omega = U_osc^2 / (omega * nu)
 constexpr double omega = 2.0 * PI;     // 固定震荡圆频率 (周期 T = 1.0)
 constexpr double nu_fixed = 8.841941282883074e-7; // 固定运动粘度
-constexpr double U_osc = 7.453559924999298e-1;
-constexpr double Re_delta = 4.472135954999579e2;
+constexpr double U_osc = 2.35702260395516e-2;
+constexpr double Re_delta = 1.41421356237309e1;
 constexpr double stokes_delta = 5.305164769729844e-4;
 constexpr bool enable_bulk_pressure_feedback = false;
 
 // --- Bypass transition controls ---
 // Set bypass_perturbation_amp = 0.0 for a clean laminar Stokes validation.
-constexpr double bypass_perturbation_amp = 1.0e-6 * U_osc;
+constexpr double bypass_perturbation_amp = 1.0e-4 * U_osc;
 
 constexpr bool output_tau_wall_maps = true;
-constexpr double stat_output_dt = 0.005;         // 记录/核对用；实际步数见 stat_output_interval
-constexpr double tau_wall_map_output_dt = 0.02;  // 记录/核对用；实际步数见 tau_wall_map_interval
+constexpr double stat_output_dt = 0.001;         // 记录/核对用；实际步数见 stat_output_interval
+constexpr double tau_wall_map_output_dt = 0.01;  // 记录/核对用；实际步数见 tau_wall_map_interval
 
 #ifdef ZERO_CROSS_FLOW
 	// 阶段一：纯震荡层流验证
-	constexpr double uCRF = 0.0;
-	constexpr double ubulk = 0.0;
-	constexpr double nu = nu_fixed;
+constexpr double uCRF = 0.0;
+constexpr double ubulk = 0.0;
+constexpr double nu = nu_fixed;
 #else
 	// 阶段二：定来流研究 (保留你原有的设置)
-	constexpr double uCRF = 0.0; 
-	constexpr double ubulk = 0.6666666666666666666666667;
-	constexpr double nu = nu_fixed;  
+constexpr double uCRF = 0.0;
+constexpr double ubulk = 0.6666666666666666666666667;
+constexpr double nu = nu_fixed;
 #endif
 
 // Use a pi-fraction domain for the oscillating boundary-layer calculation.
+
+// --- 当前算例时间参数 ---
+constexpr double dt = 2.0e-4;
+constexpr int stat_output_interval = 5;    
+constexpr int tau_wall_map_interval = 50;  
+constexpr int restart_output_interval = 5000;
+constexpr int restart_input_step = -1;       // -1 reads the latest restart_*.dat; otherwise reads restart_%08d.dat
+
 constexpr double xlength = PI / 16.0;
 // constexpr double ylength = 2.0;//全槽道
 constexpr double ylength = 1.0;//半槽道
 constexpr double zlength = PI / 64.0;
 
-// constexpr int nxp = 640;
-// constexpr int nyp = 511;
-// constexpr int nzp = 640;
-
-// constexpr int nxp = 364;
-// // constexpr int nyp = 191;
-// constexpr int nyp = 257;
-// constexpr int nzp = 256;
-
 constexpr int nxp = 768;
+//constexpr int nyp = 191;
 constexpr int nyp = 257;
+//constexpr int nyp = 383;
+//constexpr int nyp = 513;
 constexpr int nzp = 192;
+
+
+/* Retau=150 */
+//constexpr double ubulk = 1.000000000;
+//constexpr double uCRF = 1.000000000;  //参考系速度,若壁面静止则为0；流体相对静止则为ubulk
+//constexpr double nu = 4.5903E-4;
+//constexpr double PI = 3.14159265358979323846264338327950288;
+//
+//
+//constexpr double V_wall_blowing = 0.0034 * ubulk;//  (Uniform Blowing/Suction)0.5%
+//
+//constexpr double xlength = 15.70796327;
+//constexpr double ylength = 2.0;
+//constexpr double zlength = 6.283185307;
+//
+//constexpr int nxp = 128;
+//constexpr int nyp = 191;
+//constexpr int nzp = 128;
+/* Retau=150 */
 
 constexpr int nxc = nxp - 1;
 constexpr int nyc = nyp - 1;
@@ -190,12 +245,11 @@ constexpr double interpcoe4 = -1.0 / 16.0;
 
 constexpr double zero = 0.0;
 
-// --- 当前算例时间参数 ---
-constexpr double dt = 5.0e-5;
-constexpr double simulation_cycles = 15.0;
-constexpr int timemax = 300000;              // simulation_cycles / dt
-constexpr int stat_output_interval = 100;    // 0.005 / dt
-constexpr int tau_wall_map_interval = 400;   // 0.02 / dt
+#ifdef Restart
+constexpr int timemax = 20000;
+#else
+constexpr int timemax = 25000;
+#endif // Restart
 
 
 struct RK

@@ -1224,13 +1224,14 @@ void calcuate()
 	clock_t start, finish;
 
 	start = clock();
-	bc_velocity << < nzp, nxp >> > (flu, 0.0);
+	bc_velocity << < nzp, nxp >> > (flu, restart_start_step * dt);
 	CHECK_CUDA(cudaDeviceSynchronize());
 
 	for (int t = 0; t < timemax; t++)
 	{
         // 计算当前物理时间，用于传递给含时边界
-		double t_stage_start = t * dt;
+		const int global_step_start = restart_start_step + t;
+		double t_stage_start = global_step_start * dt;
 
 		for (int ns = 0; ns < 3; ns++)
 		{
@@ -1327,7 +1328,7 @@ void calcuate()
 		}
 
 
-		const int completed_step = t + 1;
+		const int completed_step = restart_start_step + t + 1;
 		const double completed_time = completed_step * dt;
 
 		if (completed_step % stat_output_interval == 0) {
@@ -1344,10 +1345,10 @@ void calcuate()
 			//output_velocity(flu, flu_host, t);
 			clcstat(flu, completed_time, completed_step);
 		}
-		if (completed_step % 5000 == 0 || completed_step == timemax)
+		if (completed_step % restart_output_interval == 0 || t + 1 == timemax)
 		{
 			//output_velocity(flu, flu_host, t);
-			output_restart(flu, flu_host, var);
+			output_restart(flu, flu_host, var, completed_step);
 		}
 #else
 		if (t % 1 == 0)
@@ -1363,10 +1364,10 @@ void calcuate()
 		{
 			clcstat(flu, completed_time, completed_step);
 		}
-		if (completed_step % 5000 == 0 || completed_step == timemax)
+		if (completed_step % restart_output_interval == 0 || t + 1 == timemax)
 		{
 			//output_velocity(flu, flu_host, t);
-			output_restart(flu, flu_host, var);
+			output_restart(flu, flu_host, var, completed_step);
 		}
 
 #endif
