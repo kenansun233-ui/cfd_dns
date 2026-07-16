@@ -168,6 +168,8 @@ constexpr double nu = nu_fixed;
 constexpr double dt = 2.0e-4;
 constexpr int stat_output_interval = 5;    
 constexpr int tau_wall_map_interval = 50;  
+constexpr bool output_field_files = false;
+constexpr int field_output_interval = 200;
 constexpr int restart_output_interval = 5000;
 constexpr int restart_input_step = -1;       // -1 reads the latest restart_*.dat; otherwise reads restart_%08d.dat
 

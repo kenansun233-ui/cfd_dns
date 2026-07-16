@@ -94,6 +94,8 @@ int main()
     fprintf(run_info, "stat_output_dt %.15e\n", stat_output_dt);
     fprintf(run_info, "tau_wall_map_interval %d\n", tau_wall_map_interval);
     fprintf(run_info, "tau_wall_map_output_dt %.15e\n", tau_wall_map_output_dt);
+    fprintf(run_info, "output_field_files %d\n", output_field_files ? 1 : 0);
+    fprintf(run_info, "field_output_interval %d\n", field_output_interval);
     fprintf(run_info, "restart_output_interval %d\n", restart_output_interval);
     fprintf(run_info, "restart_input_step %d\n", restart_input_step);
 #ifdef Restart

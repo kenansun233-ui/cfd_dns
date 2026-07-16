@@ -324,7 +324,7 @@ int Ord3(int x, int y, int z, int nzp, int nxp)
 	return x + z * nxp + (nxp * nzp) * y;
 }
 
-void output_velocity(fluid* flu, fluid* flu_host, int t)
+void output_velocity(fluid* flu, fluid* flu_host, int time_step)
 {
 	int ic, jc, kc;
 	int xyzsize = nxp * (nyp + 1) * nzp;
@@ -333,17 +333,9 @@ void output_velocity(fluid* flu, fluid* flu_host, int t)
 	CHECK_CUDA(cudaMemcpy(flu_host, flu, xyzsize * sizeof(fluid), cudaMemcpyDeviceToHost));
 
 	FILE* fp = NULL;//�ļ�ָ��
-	char filename[100];//�ļ���
-	char flu_name[100];
+	char filename[200];//�ļ���
 
-#ifdef Restart
-	sprintf_s(flu_name, "restart%d.dat", t);
-#else
-	sprintf_s(flu_name, "dns_data%d.dat", t);
-#endif // Restart
-
-	sprintf_s(filename, output_path);
-	strcat_s(filename, flu_name);
+	sprintf_s(filename, sizeof(filename), "%sfield_%08d.dat", output_path, time_step);
 	fp = open_file_checked(filename, "w+");
 
 	for (jc = 0; jc <= nyp; jc = jc + yskip)

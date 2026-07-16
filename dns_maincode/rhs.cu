@@ -1342,12 +1342,14 @@ void calcuate()
 		}
 		if (completed_step % stat_output_interval == 0)
 		{
-			//output_velocity(flu, flu_host, t);
 			clcstat(flu, completed_time, completed_step);
+		}
+		if (output_field_files && completed_step % field_output_interval == 0)
+		{
+			output_velocity(flu, flu_host, completed_step);
 		}
 		if (completed_step % restart_output_interval == 0 || t + 1 == timemax)
 		{
-			//output_velocity(flu, flu_host, t);
 			output_restart(flu, flu_host, var, completed_step);
 		}
 #else
@@ -1356,17 +1358,16 @@ void calcuate()
 			output_prgrad(prgradaver);
 			prgradaver = 0.0;
 		}
-		//if (t % 500 == 0 && t >= 5000 && t < timemax)
-		//{
-		//	output_velocity(flu, flu_host, t);
-		//}
 		if (completed_step % stat_output_interval == 0)
 		{
 			clcstat(flu, completed_time, completed_step);
 		}
+		if (output_field_files && completed_step % field_output_interval == 0)
+		{
+			output_velocity(flu, flu_host, completed_step);
+		}
 		if (completed_step % restart_output_interval == 0 || t + 1 == timemax)
 		{
-			//output_velocity(flu, flu_host, t);
 			output_restart(flu, flu_host, var, completed_step);
 		}
 
