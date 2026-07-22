@@ -36,9 +36,8 @@ void init_mesh_para()
 	memset(dydir, 0, (static_cast<size_t>(nyp) + 1) * sizeof(dyDir));
 	memset(rk, 0, 3 * sizeof(RK));
 
-	/* 单侧双曲正切(tanh)非均匀网格划分：仅在底部(y=0)极度加密 */
-	// double gamma_mesh = 3.5; 
-	double gamma_mesh = 4.0; 
+	/* 单侧双曲正切(tanh)非均匀网格划分：仅在底部(y=0)加密 */
+	double gamma_mesh = 2.0; 
 	for (int j = 1; j <= nyp; j++)
 	{
 		double xi = (double(j) - 1.0) / nyc; 
@@ -155,11 +154,8 @@ void init_fluid(fluid* flu)
 	int ic, jc, kc;
 	// double height = 0.5 * ylength;//全槽道
 	double height = ylength;//半槽道
-	// 保留你原本严格验证过的雷诺数计算逻辑，但当 ubulk = 0 时规避 NaN 运算
-	double Re = 1.0; 
-	if (fabs(ubulk) > 1e-12) {
-		Re = ubulk * height / nu;
-	}
+	// 当前仅初始化定来流槽道流。
+	double Re = ubulk * height / nu;
 	double Retau = 0.1538 * pow(Re, 0.887741);
 	double utau = Retau * nu / height;
 
@@ -169,16 +165,14 @@ void init_fluid(fluid* flu)
 	double wx = 2.0 * PI / 500.0;
 	double wz = 2.0 * PI / 200.0;
 
-	if (fabs(ubulk) > 1e-12) {
-		double xlength_plus = xlength * utau / nu;
-		double zlength_plus = zlength * utau / nu;
+	double xlength_plus = xlength * utau / nu;
+	double zlength_plus = zlength * utau / nu;
 
-		int m1 = (int)(xlength_plus * wx / (2.0 * PI)) + 1;
-		int m2 = (int)(zlength_plus * wz / (2.0 * PI)) + 1;
+	int m1 = (int)(xlength_plus * wx / (2.0 * PI)) + 1;
+	int m2 = (int)(zlength_plus * wz / (2.0 * PI)) + 1;
 
-		wx = m1 * 2.0 * PI / xlength_plus;
-		wz = m2 * 2.0 * PI / zlength_plus;
-	}
+	wx = m1 * 2.0 * PI / xlength_plus;
+	wz = m2 * 2.0 * PI / zlength_plus;
 
 	std::random_device rd;  
 	std::mt19937 gen(rd());  
@@ -211,78 +205,22 @@ void init_fluid(fluid* flu)
 		}
 		uzmean[jc] = uzmean[jc] / (nxzc);
 	}
-	
-  if (fabs(ubulk) > 1e-12) {
-		uxmean = uxmean / (nxzc * ylength);
-	}
-
-	std::uniform_real_distribution<double> noise(-1.0, 1.0);
-
-
-	double amp = bypass_perturbation_amp; 
-
-	double Lx = nxp * dx;
-	double Lz = nzp * dz;
-	double kx1 = 2.0 * PI / Lx;
-	double kz1 = 2.0 * PI / Lz;
-	double kx2 = 2.0 * kx1;
-	double kz2 = kz1;
-	double kx3 = kx1;
-	double kz3 = 2.0 * kz1;
-
-
-	double local_delta = sqrt(2.0 * nu / omega);
+	uxmean = uxmean / (nxzc * ylength);
 
 	for (jc = 1; jc < nyp; jc++)
 	{
 
-		double y = dydir[jc].yc;
-		double y_star = y / local_delta;
-
-		double f_y = 1.85 * (y_star * y_star) * exp(-y_star);
-		double near_wall_window = 1.0 - exp(-pow(y_star / 0.20, 4.0));
-		f_y *= near_wall_window;
-
 		for (kc = 0; kc < nzp; kc++)
 		{
-			double zp = kc * dz + 0.5 * dz;
 			for (ic = 0; ic < nxp; ic++)
 			{
-				double xp = ic * dx + 0.5 * dx;
-
-				if (fabs(ubulk) < 1e-12) {
-					double mode11 = sin(kz1 * zp) * cos(kx1 * xp);
-					double mode21 = sin(kz2 * zp + 0.35) * cos(kx2 * xp + 0.20);
-					double mode12 = sin(kz3 * zp + 0.70) * cos(kx3 * xp - 0.15);
-
-					double vort11 = cos(kz1 * zp) * sin(kx1 * xp);
-					double vort21 = cos(kz2 * zp + 0.35) * sin(kx2 * xp + 0.20);
-					double vort12 = cos(kz3 * zp + 0.70) * sin(kx3 * xp - 0.15);
-
-					double wall_normal = sin(kx1 * xp + 0.40) * sin(kz1 * zp - 0.25)
-						+ 0.50 * sin(kx2 * xp - 0.10) * sin(kz2 * zp + 0.45)
-						+ 0.35 * sin(kx3 * xp + 0.25) * sin(kz3 * zp + 0.10);
-
-					double seed_noise = noise(gen);
-					double noise_envelope = exp(-2.0 * y_star);
-					flu[Ord3(ic, jc, kc, nzp, nxp)].u = amp * noise_envelope * seed_noise
-						+ amp * f_y * (mode11 + 0.45 * mode21 + 0.30 * mode12);
-					flu[Ord3(ic, jc, kc, nzp, nxp)].v = 0.25 * amp * f_y * wall_normal;
-					flu[Ord3(ic, jc, kc, nzp, nxp)].w = 0.50 * amp * noise_envelope * noise(gen)
-						- amp * f_y * (
-						(kx1 / kz1) * vort11
-						+ 0.45 * (kx2 / kz2) * vort21
-						+ 0.30 * (kx3 / kz3) * vort12);
-				}
-				else {
-					flu[Ord3(ic, jc, kc, nzp, nxp)].u = flu[Ord3(ic, jc, kc, nzp, nxp)].u * ubulk / uxmean - uCRF;
-					flu[Ord3(ic, jc, kc, nzp, nxp)].w = flu[Ord3(ic, jc, kc, nzp, nxp)].w - uzmean[jc];
-				}
+				flu[Ord3(ic, jc, kc, nzp, nxp)].u = flu[Ord3(ic, jc, kc, nzp, nxp)].u * ubulk / uxmean - uCRF;
+				flu[Ord3(ic, jc, kc, nzp, nxp)].w = flu[Ord3(ic, jc, kc, nzp, nxp)].w - uzmean[jc];
 			}
 		}
 	}
 
-	/* 边界初始化：顶部滑移，底部 Stokes */
+	/* 边界初始化：顶部滑移，底部静止或震荡壁面 */
 	for (kc = 0; kc < nzp; kc++)
 		for (ic = 0; ic < nxp; ic++)
 		{
@@ -290,7 +228,7 @@ void init_fluid(fluid* flu)
 			flu[Ord3(ic, nyp, kc, nzp, nxp)].w = flu[Ord3(ic, nyc, kc, nzp, nxp)].w;
 			flu[Ord3(ic, nyp, kc, nzp, nxp)].v = 0.0;  
 
-			double initial_u_wall = U_osc * sin(0.0) - uCRF;
+			double initial_u_wall = enable_wall_oscillation ? U_osc * sin(0.0) - uCRF : -uCRF;
 			flu[Ord3(ic, 0, kc, nzp, nxp)].u = 2.0 * initial_u_wall - flu[Ord3(ic, 1, kc, nzp, nxp)].u;
 			flu[Ord3(ic, 0, kc, nzp, nxp)].w = -flu[Ord3(ic, 1, kc, nzp, nxp)].w;
 			flu[Ord3(ic, 1, kc, nzp, nxp)].v = 0.0;   
@@ -630,11 +568,17 @@ void clcstat(fluid* flu, double current_time, int time_step)
 	double c0 = (y1 + y2) / (y1 * y2);
 	double c1 = -y2 / (y1 * (y2 - y1));
 	double c2 = y1 / (y2 * (y2 - y1));
-	double u_wall = U_osc * sin(omega * current_time) - uCRF;
+	double u_wall = enable_wall_oscillation ? U_osc * sin(omega * current_time) - uCRF : -uCRF;
 	double tau_fd2 = nu * (c0 * u_wall + c1 * stat[1].um + c2 * stat[2].um);
 
-	fprintf(fp, "%.15e %.15e %.15e %.15e %.15e\n",
-		current_time, u_wall, tau_fd2, stat[1].um, stat[2].um);
+	if (enable_wall_oscillation) {
+		// 保留 current_time；restart 后它仍是从震荡起点累计的物理时间。
+		fprintf(fp, "%.15e %.15e %.15e %.15e %.15e\n",
+			current_time, u_wall, tau_fd2, stat[1].um, stat[2].um);
+	}
+	else {
+		fprintf(fp, "%.15e %.15e %.15e\n", tau_fd2, stat[1].um, stat[2].um);
+	}
 	fclose(fp);
 
 	if (output_tau_wall_maps && time_step % tau_wall_map_interval == 0)
@@ -647,7 +591,12 @@ void clcstat(fluid* flu, double current_time, int time_step)
 		strcat_s(filename, flu_name);
 		fp = open_file_checked(filename, "w+");
 
-		fprintf(fp, "%.15e %.15e %d %d\n", current_time, u_wall, nxp, nzp);
+		if (enable_wall_oscillation) {
+			fprintf(fp, "%.15e %.15e %d %d\n", current_time, u_wall, nxp, nzp);
+		}
+		else {
+			fprintf(fp, "%d %d\n", nxp, nzp);
+		}
 		for (int kc = 0; kc < nzp; kc++)
 		{
 			for (int ic = 0; ic < nxp; ic++)

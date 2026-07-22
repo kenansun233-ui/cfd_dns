@@ -88,8 +88,9 @@ int main()
     fprintf(run_info, "xlength %.15e\n", xlength);
     fprintf(run_info, "ylength %.15e\n", ylength);
     fprintf(run_info, "zlength %.15e\n", zlength);
+    fprintf(run_info, "enable_wall_oscillation %d\n", enable_wall_oscillation ? 1 : 0);
     fprintf(run_info, "enable_bulk_pressure_feedback %d\n", enable_bulk_pressure_feedback ? 1 : 0);
-    fprintf(run_info, "bypass_perturbation_amp %.15e\n", bypass_perturbation_amp);
+    fprintf(run_info, "restart_continues_oscillation_time %d\n", restart_continues_oscillation_time ? 1 : 0);
     fprintf(run_info, "stat_output_interval %d\n", stat_output_interval);
     fprintf(run_info, "stat_output_dt %.15e\n", stat_output_dt);
     fprintf(run_info, "tau_wall_map_interval %d\n", tau_wall_map_interval);
@@ -133,6 +134,7 @@ int main()
         exit(EXIT_FAILURE);
     }
     fprintf(run_info, "restart_start_step %d\n", restart_start_step);
+    fprintf(run_info, "oscillation_start_step %d\n", restart_continues_oscillation_time ? restart_start_step : 0);
     fclose(run_info);
  
     CHECK_CUDA(cudaMemcpy(flu, flu_host, nxp * (nyp + 1) * nzp * sizeof(fluid), cudaMemcpyHostToDevice));

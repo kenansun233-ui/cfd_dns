@@ -970,9 +970,9 @@ __global__ void bc_velocity(fluid* flu, double current_time)
 		flu[d_Ord3(ic, nyp, kc, nzp, nxp)].u = flu[d_Ord3(ic, nyc, kc, nzp, nxp)].u;
 		flu[d_Ord3(ic, nyp, kc, nzp, nxp)].w = flu[d_Ord3(ic, nyc, kc, nzp, nxp)].w;
 
-		// 底部：Stokes震荡壁面
+		// 底部：静止或 Stokes 震荡壁面
 		flu[d_Ord3(ic, 1, kc, nzp, nxp)].v = 0.0; 
-		double u_wall = U_osc * sin(omega * current_time) - uCRF;
+		double u_wall = enable_wall_oscillation ? U_osc * sin(omega * current_time) - uCRF : -uCRF;
 		flu[d_Ord3(ic, 0, kc, nzp, nxp)].u = 2.0 * u_wall - flu[d_Ord3(ic, 1, kc, nzp, nxp)].u;
 		flu[d_Ord3(ic, 0, kc, nzp, nxp)].w = -flu[d_Ord3(ic, 1, kc, nzp, nxp)].w;
 	}
@@ -1224,14 +1224,15 @@ void calcuate()
 	clock_t start, finish;
 
 	start = clock();
-	bc_velocity << < nzp, nxp >> > (flu, restart_start_step * dt);
+	const int oscillation_start_step = restart_continues_oscillation_time ? restart_start_step : 0;
+	bc_velocity << < nzp, nxp >> > (flu, oscillation_start_step * dt);
 	CHECK_CUDA(cudaDeviceSynchronize());
 
 	for (int t = 0; t < timemax; t++)
 	{
         // 计算当前物理时间，用于传递给含时边界
-		const int global_step_start = restart_start_step + t;
-		double t_stage_start = global_step_start * dt;
+		const int oscillation_step_start = oscillation_start_step + t;
+		double t_stage_start = oscillation_step_start * dt;
 
 		for (int ns = 0; ns < 3; ns++)
 		{
@@ -1240,12 +1241,13 @@ void calcuate()
             double t_current = t_stage_start;
             double t_next    = t_current + rk[ns].alpha;
 
-            // 分别计算当前时刻和下一时刻的物理壁面速度
-            double u_wall_current = U_osc * sin(omega * t_current) - uCRF;
-            double u_wall_next = U_osc * sin(omega * t_next) - uCRF;
-            
-            // 求出在这一个极小的 RK 子步内的速度增量
-            double dU_wall = u_wall_next - u_wall_current;
+			// 关闭震荡时 dU_wall 为零，CN 移动壁面补偿自动失效。
+			double dU_wall = 0.0;
+			if (enable_wall_oscillation) {
+				double u_wall_current = U_osc * sin(omega * t_current) - uCRF;
+				double u_wall_next = U_osc * sin(omega * t_next) - uCRF;
+				dU_wall = u_wall_next - u_wall_current;
+			}
 			/*修改时间补偿*/
 
 			Update_VelInterp_uvw << < gridDim, blockDim >> > (flu, uxhx, uyhx, uzhx, uxhz, uyhz, uzhz);  //flu ��Ҫ��gpu�϶���
@@ -1321,7 +1323,9 @@ void calcuate()
 			/*update*/
 
 			CHECK_CUDA(cudaMemcpy(&s3tot_host, s3tot, sizeof(double), cudaMemcpyDeviceToHost));
-			//prgradaver += nu * (s3tot_host) / nxzc / ylength * rk[ns].alpha / dt;
+			if (enable_bulk_pressure_feedback) {
+				prgradaver += nu * (s3tot_host) / nxzc / ylength * rk[ns].alpha / dt;
+			}
 
 			t_stage_start = t_next;
 
@@ -1329,7 +1333,7 @@ void calcuate()
 
 
 		const int completed_step = restart_start_step + t + 1;
-		const double completed_time = completed_step * dt;
+		const double completed_time = (oscillation_start_step + t + 1) * dt;
 
 		if (completed_step % stat_output_interval == 0) {
 			printf("%d     prgrad= %f \n", completed_step, prgradaver);
