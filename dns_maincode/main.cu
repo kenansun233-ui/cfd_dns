@@ -97,6 +97,12 @@ int main()
     fprintf(run_info, "tau_wall_map_output_dt %.15e\n", tau_wall_map_output_dt);
     fprintf(run_info, "output_field_files %d\n", output_field_files ? 1 : 0);
     fprintf(run_info, "field_output_interval %d\n", field_output_interval);
+    fprintf(run_info, "field_xskip %d\n", field_xskip);
+    fprintf(run_info, "field_yskip %d\n", field_yskip);
+    fprintf(run_info, "field_zskip %d\n", field_zskip);
+    fprintf(run_info, "restart_xskip %d\n", xskip);
+    fprintf(run_info, "restart_yskip %d\n", yskip);
+    fprintf(run_info, "restart_zskip %d\n", zskip);
     fprintf(run_info, "restart_output_interval %d\n", restart_output_interval);
     fprintf(run_info, "restart_input_step %d\n", restart_input_step);
 #ifdef Restart

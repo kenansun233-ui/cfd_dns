@@ -276,9 +276,9 @@ void output_velocity(fluid* flu, fluid* flu_host, int time_step)
 	sprintf_s(filename, sizeof(filename), "%sfield_%08d.dat", output_path, time_step);
 	fp = open_file_checked(filename, "w+");
 
-	for (jc = 0; jc <= nyp; jc = jc + yskip)
-		for (kc = 0; kc < nzp; kc = kc + zskip)
-			for (ic = 0; ic < nxp; ic = ic + xskip)
+	for (jc = 0; jc <= nyp; jc = jc + field_yskip)
+		for (kc = 0; kc < nzp; kc = kc + field_zskip)
+			for (ic = 0; ic < nxp; ic = ic + field_xskip)
 			{
 				//fprintf(fp, "%d %d %e %e %d\n", flu[i].x, flu[i].y, flu[i].ux, flu[i].uy, flu[i].type);
 				fprintf(fp, "%.15e %.15e %.15e %.15e\n", flu_host[Ord3(ic, jc, kc, nzp, nxp)].u, flu_host[Ord3(ic, jc, kc, nzp, nxp)].v, flu_host[Ord3(ic, jc, kc, nzp, nxp)].w, flu_host[Ord3(ic, jc, kc, nzp, nxp)].p);

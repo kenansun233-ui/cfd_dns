@@ -171,6 +171,10 @@ constexpr int stat_output_interval = 10;
 constexpr int tau_wall_map_interval = 100;
 constexpr bool output_field_files = false;
 constexpr int field_output_interval = 400;
+// 三维场输出独立于 restart；restart 仍使用 xskip/yskip/zskip。
+constexpr int field_xskip = 1;
+constexpr int field_yskip = 1;
+constexpr int field_zskip = 1;
 constexpr int restart_output_interval = 1000;
 constexpr int restart_input_step = -1;       // -1 reads the latest restart_*.dat; otherwise reads restart_%08d.dat
 constexpr double simulation_cycles = 10.0;
@@ -261,7 +265,7 @@ extern RK* rk_device;
 
 extern char output_path[100];
 
-/*output set*/
+/* restart/mesh output sampling; field output has independent field_*skip values above. */
 constexpr int xskip = 2;
 constexpr int yskip = 1;
 constexpr int zskip = 2;
