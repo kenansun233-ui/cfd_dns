@@ -100,6 +100,8 @@ int main()
     fprintf(run_info, "field_xskip %d\n", field_xskip);
     fprintf(run_info, "field_yskip %d\n", field_yskip);
     fprintf(run_info, "field_zskip %d\n", field_zskip);
+    fprintf(run_info, "field_output_start_step %d\n", field_output_start_step);
+    fprintf(run_info, "field_output_end_step %d\n", field_output_end_step);
     fprintf(run_info, "restart_xskip %d\n", xskip);
     fprintf(run_info, "restart_yskip %d\n", yskip);
     fprintf(run_info, "restart_zskip %d\n", zskip);

@@ -1348,7 +1348,10 @@ void calcuate()
 		{
 			clcstat(flu, completed_time, completed_step);
 		}
-		if (output_field_files && completed_step % field_output_interval == 0)
+		if (output_field_files &&
+			(field_output_start_step < 0 || completed_step >= field_output_start_step) &&
+			(field_output_end_step < 0 || completed_step <= field_output_end_step) &&
+			completed_step % field_output_interval == 0)
 		{
 			output_velocity(flu, flu_host, completed_step);
 		}
@@ -1366,7 +1369,10 @@ void calcuate()
 		{
 			clcstat(flu, completed_time, completed_step);
 		}
-		if (output_field_files && completed_step % field_output_interval == 0)
+		if (output_field_files &&
+			(field_output_start_step < 0 || completed_step >= field_output_start_step) &&
+			(field_output_end_step < 0 || completed_step <= field_output_end_step) &&
+			completed_step % field_output_interval == 0)
 		{
 			output_velocity(flu, flu_host, completed_step);
 		}

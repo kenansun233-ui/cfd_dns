@@ -175,6 +175,9 @@ constexpr int field_output_interval = 400;
 constexpr int field_xskip = 1;
 constexpr int field_yskip = 1;
 constexpr int field_zskip = 1;
+// 场输出窗口：start 和 end 都包含；-1 表示不限制该端点。
+constexpr int field_output_start_step = -1;
+constexpr int field_output_end_step = -1;
 constexpr int restart_output_interval = 1000;
 constexpr int restart_input_step = -1;       // -1 reads the latest restart_*.dat; otherwise reads restart_%08d.dat
 constexpr double simulation_cycles = 10.0;
