@@ -28,7 +28,7 @@ struct process_variables
 	//cufftDoubleComplex* prsrc;
 	//double prsrc;
 
-	/*��취�Ż�*/
+	/*想办法优化*/
 	//double uxhx;
 	//double uyhx;
 	//double uzhx;
@@ -89,40 +89,131 @@ extern cufftDoubleComplex* prsrc;
 //#define Restart
 #define Output_Restart
 
-constexpr double ubulk = 0.6666666666666666666666667;
-constexpr double nu = 3.37668E-5;
+/* Retau = 1000 */
+//constexpr double ubulk = 1.000000000;
+//constexpr double nu = 5.00000E-05;
+//constexpr double PI = 3.14159265358979323846264338327950288;
+//constexpr double uCRF = 1.000000000;  //参考系速度
+// 
+//constexpr double xlength = 6.283185307;
+//constexpr double ylength = 2.0;
+//constexpr double zlength = 3.141592654;
+//
+//constexpr int nxp = 576;
+//constexpr int nyp = 383;
+//constexpr int nzp = 576;
+/* Retau = 1000 */
+
+/* Retau = 180 */
+//constexpr double ubulk = 0.6666666666666666666666667;
+////constexpr double ubulk = 0.333333333333333333333333333333;
+//constexpr double nu = 2.3310E-4;
+//constexpr double PI = 3.14159265358979323846264338327950288;
+//constexpr double uCRF = 0.6666666666666666666666667;  //参考系速度,若壁面静止则为0；流体相对静止则为ubulk
+//
+//constexpr double xlength = 12.56637061;
+//constexpr double ylength = 2.0;
+//constexpr double zlength = 6.283185307;
+//
+//constexpr int nxp = 384;
+//constexpr int nyp = 191;
+//constexpr int nzp = 256;
+/* Retau = 180 */
+
+
 constexpr double PI = 3.14159265358979323846264338327950288;
-constexpr double uCRF = 0.6666666666666666666666667;  //参考系速度
 
-constexpr double xlength = 6.283185307;
-constexpr double ylength = 2.0;
-constexpr double zlength = 3.141592654;
 
-constexpr int nxp = 640;
-constexpr int nyp = 511;
-constexpr int nzp = 640;
+// ==============================================================================
+// 物理模拟控制开关 (通过注释切换)
+// ==============================================================================
+// #define ZERO_CROSS_FLOW  // 仅保留作零来流 Stokes 验证的历史配置。
+constexpr bool enable_wall_oscillation = true;
+// 当前算例: Re_tau 基准槽道, h = 0.1, Re_omega = 1e5
+// 定义:
+// Re_omega = U_osc^2 / (omega * nu)
+// Re_delta = U_osc * sqrt(2.0 * nu / omega) / nu = sqrt(2.0 * Re_omega)
+// stokes_delta = sqrt(2.0 * nu / omega)
+// 若切换 Re_omega，请同步修改 U_osc、Re_delta 和输出设置。
+constexpr double Re_omega = 1.0e5;  // Re_omega = U_osc^2 / (omega * nu)
+constexpr double omega = 2.0 * PI / 5.0; // Patil & Fringer (2022): Tw = 5, omega = 2*pi/5
+constexpr double nu_fixed = 8.841941282883074e-7; // 固定运动粘度
+constexpr double U_osc = 3.333333333333330e-1;
+constexpr double Re_delta = 4.472135954999580e2;
+constexpr double stokes_delta = 1.186270905695295e-3;
+// true: constant bulk flow; false: constant mean pressure gradient.
+constexpr bool enable_bulk_pressure_feedback = false;
+// This code stores (1/rho)*dp_bar/dx. A negative value drives flow in +x.
+// Value obtained from the last 1000 steps of the unforced standard channel.
+constexpr double fixed_pressure_gradient = -2.127485948000000e-5;
+constexpr bool restart_continues_oscillation_time = false; // false: restart from developed channel and start wall phase at t=0
 
-/* 复刻 Sumitani & Kasagi (1995) AIAA Journal 原始工况数据  */
-/*
-constexpr double xlength = 15.70796327; // 5.0 * PI
-constexpr double ylength = 2.0;      // 2.0
-constexpr double zlength = 6.283185307; // 2.0 * PI
+// --- 零来流 Stokes 扰动历史参数（当前槽道流初始化不使用） ---
+// constexpr double bypass_perturbation_amp = 1.0e-4 * U_osc;
 
-constexpr int nxp = 128; // 流向
-constexpr int nyp = 127; // 法向 
-constexpr int nzp = 128; // 展向
-// (Re_tau = 150)
-constexpr double ubulk = 1.0;              // 归一化体平均速度 U_m = 1.0
-constexpr double nu = 4.5903e-4;        // 运动粘度 nu = 1.0 / 2178.5
-constexpr double uCRF = 1.0;
+// Enable only for a selected short high-cadence analysis window.
+constexpr bool output_tau_wall_maps = false;
+constexpr double stat_output_dt = 8.0e-3;        // dt * stat_output_interval
+constexpr double tau_wall_map_output_dt = 5.0e-1;// dt * tau_wall_map_interval
 
-// 吹吸控制参数 (Uniform Blowing/Suction)
-constexpr double V_wall_blowing = 0.0034 * ubulk; 
+// 零来流 Stokes 验证配置：
+// constexpr double uCRF = 0.0;
+// constexpr double ubulk = 0.0;
+// constexpr double nu = nu_fixed;
 
-// 时间步长
-constexpr double dt = 0.005; // 稍微改小一点以保证 DNS 稳定性
-*/
+// ubulk is the initial/reference velocity. It is constrained only when
+// enable_bulk_pressure_feedback is true.
+constexpr double uCRF = 0.0;
+constexpr double ubulk = 2.528521911424e-2;
+constexpr double nu = nu_fixed;
 
+// 半槽高 H = 0.1；网格/流域按 Patil & Fringer (2022) bumpy-wall case:
+// Lx = 2*pi*H, Lz = pi*H；grid = 512(streamwise) x 256(spanwise) x 128(wall-normal).
+
+// --- 当前算例时间参数 ---
+constexpr double dt = 8.0e-4;
+constexpr int timemax = 125000; // 20 cycles: T = 5, 6250 steps per cycle
+constexpr int stat_output_interval = 10;
+constexpr int tau_wall_map_interval = 625;
+constexpr bool output_field_files = false;
+constexpr int field_output_interval = 400;
+// 三维场输出独立于 restart；restart 仍使用 xskip/yskip/zskip。
+constexpr int field_xskip = 1;
+constexpr int field_yskip = 1;
+constexpr int field_zskip = 1;
+// 场输出窗口：start 和 end 都包含；-1 表示不限制该端点。
+constexpr int field_output_start_step = -1;
+constexpr int field_output_end_step = -1;
+constexpr int restart_output_interval = 12500;
+constexpr int restart_input_step = -1;       // -1 reads the latest restart_*.dat; otherwise reads restart_%08d.dat
+constexpr double simulation_cycles = 20.0;
+
+constexpr double ylength = 0.1;
+constexpr double xlength = 2.0 * PI * ylength;
+constexpr double zlength = PI * ylength;
+
+constexpr int nyp = 128;
+constexpr int nxp = 512;
+constexpr int nzp = 256;
+
+
+/* Retau=150 */
+//constexpr double ubulk = 1.000000000;
+//constexpr double uCRF = 1.000000000;  //参考系速度,若壁面静止则为0；流体相对静止则为ubulk
+//constexpr double nu = 4.5903E-4;
+//constexpr double PI = 3.14159265358979323846264338327950288;
+//
+//
+//constexpr double V_wall_blowing = 0.0034 * ubulk;//  (Uniform Blowing/Suction)0.5%
+//
+//constexpr double xlength = 15.70796327;
+//constexpr double ylength = 2.0;
+//constexpr double zlength = 6.283185307;
+//
+//constexpr int nxp = 128;
+//constexpr int nyp = 191;
+//constexpr int nzp = 128;
+/* Retau=150 */
 
 constexpr int nxc = nxp - 1;
 constexpr int nyc = nyp - 1;
@@ -167,15 +258,6 @@ constexpr double interpcoe4 = -1.0 / 16.0;
 
 constexpr double zero = 0.0;
 
-constexpr double dt = 0.0002;
-
-#ifdef Restart
-constexpr int timemax = 20000;
-#else
-constexpr int timemax = 20000;
-#endif // Restart
-
-
 struct RK
 {
 	double gamma;
@@ -192,7 +274,7 @@ extern RK* rk_device;
 
 extern char output_path[100];
 
-/*output set*/
+/* restart/mesh output sampling; field output has independent field_*skip values above. */
 constexpr int xskip = 2;
 constexpr int yskip = 1;
 constexpr int zskip = 2;
@@ -214,18 +296,5 @@ struct Stat
 	double pm2;
 };
 
-
-
-/* 吹吸控制参数*/
-
-/*
-
-// 定义吹吸产生的垂直速度 V_wall
-// 建议设置为 0.005 (即千分之五的参考速度)，这是文献中的典型值。
-// 如果你想效果更剧烈，可以改成 0.01；想微弱一点，改成 0.002。
-constexpr double V_wall_blowing = 0.005; 
-
-
-*/
 
 #endif
