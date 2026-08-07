@@ -129,34 +129,40 @@ constexpr double PI = 3.14159265358979323846264338327950288;
 // ==============================================================================
 // #define ZERO_CROSS_FLOW  // 仅保留作零来流 Stokes 验证的历史配置。
 constexpr bool enable_wall_oscillation = true;
-// 当前算例: Re_tau = 180, h = 0.1, Re_omega = 100
+// 当前算例: Re_tau 基准槽道, h = 0.1, Re_omega = 1e5
 // 定义:
 // Re_omega = U_osc^2 / (omega * nu)
 // Re_delta = U_osc * sqrt(2.0 * nu / omega) / nu = sqrt(2.0 * Re_omega)
 // stokes_delta = sqrt(2.0 * nu / omega)
 // 若切换 Re_omega，请同步修改 U_osc、Re_delta 和输出设置。
-constexpr double Re_omega = 100.0;  // Re_omega = U_osc^2 / (omega * nu)
+constexpr double Re_omega = 1.0e5;  // Re_omega = U_osc^2 / (omega * nu)
 constexpr double omega = 2.0 * PI / 5.0; // Patil & Fringer (2022): Tw = 5, omega = 2*pi/5
 constexpr double nu_fixed = 8.841941282883074e-7; // 固定运动粘度
-constexpr double U_osc = 1.054092553389460e-2;
-constexpr double Re_delta = 1.414213562373095e1;
+constexpr double U_osc = 3.333333333333330e-1;
+constexpr double Re_delta = 4.472135954999580e2;
 constexpr double stokes_delta = 1.186270905695295e-3;
-constexpr bool enable_bulk_pressure_feedback = true;
+// true: constant bulk flow; false: constant mean pressure gradient.
+constexpr bool enable_bulk_pressure_feedback = false;
+// This code stores (1/rho)*dp_bar/dx. A negative value drives flow in +x.
+// Value obtained from the last 1000 steps of the unforced standard channel.
+constexpr double fixed_pressure_gradient = -2.127485948000000e-5;
 constexpr bool restart_continues_oscillation_time = false; // false: restart from developed channel and start wall phase at t=0
 
 // --- 零来流 Stokes 扰动历史参数（当前槽道流初始化不使用） ---
 // constexpr double bypass_perturbation_amp = 1.0e-4 * U_osc;
 
-constexpr bool output_tau_wall_maps = true;
-constexpr double stat_output_dt = 0.05;          // 记录/核对用；实际步数见 stat_output_interval
-constexpr double tau_wall_map_output_dt = 0.5;   // 记录/核对用；实际步数见 tau_wall_map_interval
+// Enable only for a selected short high-cadence analysis window.
+constexpr bool output_tau_wall_maps = false;
+constexpr double stat_output_dt = 8.0e-3;        // dt * stat_output_interval
+constexpr double tau_wall_map_output_dt = 5.0e-1;// dt * tau_wall_map_interval
 
 // 零来流 Stokes 验证配置：
 // constexpr double uCRF = 0.0;
 // constexpr double ubulk = 0.0;
 // constexpr double nu = nu_fixed;
 
-// 当前配置：Re_tau = 180 的半槽道定流量算例。
+// ubulk is the initial/reference velocity. It is constrained only when
+// enable_bulk_pressure_feedback is true.
 constexpr double uCRF = 0.0;
 constexpr double ubulk = 2.528521911424e-2;
 constexpr double nu = nu_fixed;
@@ -165,10 +171,10 @@ constexpr double nu = nu_fixed;
 // Lx = 2*pi*H, Lz = pi*H；grid = 512(streamwise) x 256(spanwise) x 128(wall-normal).
 
 // --- 当前算例时间参数 ---
-constexpr double dt = 5.0e-3;
-constexpr int timemax = 10000;  // 10 个震荡周期，dt = 0.005 且 T = 5
+constexpr double dt = 8.0e-4;
+constexpr int timemax = 125000; // 20 cycles: T = 5, 6250 steps per cycle
 constexpr int stat_output_interval = 10;
-constexpr int tau_wall_map_interval = 100;
+constexpr int tau_wall_map_interval = 625;
 constexpr bool output_field_files = false;
 constexpr int field_output_interval = 400;
 // 三维场输出独立于 restart；restart 仍使用 xskip/yskip/zskip。
@@ -178,9 +184,9 @@ constexpr int field_zskip = 1;
 // 场输出窗口：start 和 end 都包含；-1 表示不限制该端点。
 constexpr int field_output_start_step = -1;
 constexpr int field_output_end_step = -1;
-constexpr int restart_output_interval = 1000;
+constexpr int restart_output_interval = 12500;
 constexpr int restart_input_step = -1;       // -1 reads the latest restart_*.dat; otherwise reads restart_%08d.dat
-constexpr double simulation_cycles = 10.0;
+constexpr double simulation_cycles = 20.0;
 
 constexpr double ylength = 0.1;
 constexpr double xlength = 2.0 * PI * ylength;

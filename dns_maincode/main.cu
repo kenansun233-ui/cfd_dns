@@ -63,57 +63,6 @@ int main()
     sprintf(output_path, "E:\\lch\\");
     _mkdir(output_path);
 
-    char run_info_name[200];
-    sprintf_s(run_info_name, "%srun_info.dat", output_path);
-    FILE* run_info = nullptr;
-    fopen_s(&run_info, run_info_name, "w");
-    if (run_info == nullptr)
-    {
-        fprintf(stderr, "Failed to open file: %s\n", run_info_name);
-        exit(EXIT_FAILURE);
-    }
-
-    fprintf(run_info, "Re_omega %.15e\n", Re_omega);
-    fprintf(run_info, "Re_delta %.15e\n", Re_delta);
-    fprintf(run_info, "U_osc %.15e\n", U_osc);
-    fprintf(run_info, "omega %.15e\n", omega);
-    fprintf(run_info, "nu %.15e\n", nu);
-    fprintf(run_info, "stokes_delta %.15e\n", stokes_delta);
-    fprintf(run_info, "simulation_cycles %.15e\n", simulation_cycles);
-    fprintf(run_info, "dt %.15e\n", dt);
-    fprintf(run_info, "timemax %d\n", timemax);
-    fprintf(run_info, "nxp %d\n", nxp);
-    fprintf(run_info, "nyp %d\n", nyp);
-    fprintf(run_info, "nzp %d\n", nzp);
-    fprintf(run_info, "xlength %.15e\n", xlength);
-    fprintf(run_info, "ylength %.15e\n", ylength);
-    fprintf(run_info, "zlength %.15e\n", zlength);
-    fprintf(run_info, "enable_wall_oscillation %d\n", enable_wall_oscillation ? 1 : 0);
-    fprintf(run_info, "enable_bulk_pressure_feedback %d\n", enable_bulk_pressure_feedback ? 1 : 0);
-    fprintf(run_info, "restart_continues_oscillation_time %d\n", restart_continues_oscillation_time ? 1 : 0);
-    fprintf(run_info, "stat_output_interval %d\n", stat_output_interval);
-    fprintf(run_info, "stat_output_dt %.15e\n", stat_output_dt);
-    fprintf(run_info, "tau_wall_map_interval %d\n", tau_wall_map_interval);
-    fprintf(run_info, "tau_wall_map_output_dt %.15e\n", tau_wall_map_output_dt);
-    fprintf(run_info, "output_field_files %d\n", output_field_files ? 1 : 0);
-    fprintf(run_info, "field_output_interval %d\n", field_output_interval);
-    fprintf(run_info, "field_xskip %d\n", field_xskip);
-    fprintf(run_info, "field_yskip %d\n", field_yskip);
-    fprintf(run_info, "field_zskip %d\n", field_zskip);
-    fprintf(run_info, "field_output_start_step %d\n", field_output_start_step);
-    fprintf(run_info, "field_output_end_step %d\n", field_output_end_step);
-    fprintf(run_info, "restart_xskip %d\n", xskip);
-    fprintf(run_info, "restart_yskip %d\n", yskip);
-    fprintf(run_info, "restart_zskip %d\n", zskip);
-    fprintf(run_info, "restart_output_interval %d\n", restart_output_interval);
-    fprintf(run_info, "restart_input_step %d\n", restart_input_step);
-#ifdef Restart
-    fprintf(run_info, "Restart 1\n");
-#else
-    fprintf(run_info, "Restart 0\n");
-#endif
-    fclose(run_info);
-
     CHECK_CUDA(cudaMalloc((void**)&flu, nxp * (nyp + 1) * nzp * sizeof(fluid)));
     CHECK_CUDA(cudaMalloc((void**)&var, nxp * (nyp + 1) * nzp * sizeof(process_variables)));
 
@@ -135,12 +84,31 @@ int main()
     init_fluid(flu_host);
 #endif
 
-    fopen_s(&run_info, run_info_name, "a+");
+    char run_info_name[200];
+    sprintf_s(run_info_name, "%srun_info.dat", output_path);
+    FILE* run_info = nullptr;
+    fopen_s(&run_info, run_info_name, "w");
     if (run_info == nullptr)
     {
         fprintf(stderr, "Failed to open file: %s\n", run_info_name);
         exit(EXIT_FAILURE);
     }
+
+    fprintf(run_info, "Re_omega %.15e\n", Re_omega);
+    fprintf(run_info, "U_osc %.15e\n", U_osc);
+    fprintf(run_info, "omega %.15e\n", omega);
+    fprintf(run_info, "nu %.15e\n", nu);
+    fprintf(run_info, "dt %.15e\n", dt);
+    fprintf(run_info, "timemax %d\n", timemax);
+    fprintf(run_info, "stat_output_interval %d\n", stat_output_interval);
+    fprintf(run_info, "nxp %d\n", nxp);
+    fprintf(run_info, "nyp %d\n", nyp);
+    fprintf(run_info, "nzp %d\n", nzp);
+    fprintf(run_info, "xlength %.15e\n", xlength);
+    fprintf(run_info, "ylength %.15e\n", ylength);
+    fprintf(run_info, "zlength %.15e\n", zlength);
+    fprintf(run_info, "enable_wall_oscillation %d\n", enable_wall_oscillation ? 1 : 0);
+    fprintf(run_info, "enable_bulk_pressure_feedback %d\n", enable_bulk_pressure_feedback ? 1 : 0);
     fprintf(run_info, "restart_start_step %d\n", restart_start_step);
     fprintf(run_info, "oscillation_start_step %d\n", restart_continues_oscillation_time ? restart_start_step : 0);
     fclose(run_info);

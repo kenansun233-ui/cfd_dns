@@ -135,7 +135,9 @@ __global__ void rhsx(fluid* flu, process_variables* var, dyDir* dydir, Ypara* yp
 			dzzcoe5 * flu[d_Ord3(ic, jc, ku, nzp, nxp)].u;
 
 		double dcq13 = d11q1 + d33q1;
-		atomicAdd(s3tot, (dcq13 + d22q1) * dydir[jc].dyp);
+		if (enable_bulk_pressure_feedback) {
+			atomicAdd(s3tot, (dcq13 + d22q1) * dydir[jc].dyp);
+		}
 		//atomicAdd(s3tot, dcq13);
 
 		double convEd1 = -h11 - h12 - h13 + nu * dcq13;
@@ -310,11 +312,11 @@ __global__ void rhsy(fluid* flu, process_variables* var, dyDir* dydir, Ypara* yp
 
 __global__ void correct_rhsx(fluid* flu, process_variables* var, dyDir* dydir, Ypara* ypara, double* s3tot, int ns, RK* rk)  
 {
-	double dp1ns = nu * (*s3tot) / nxzc / ylength * rk[ns].alpha;
-
-	if (!enable_bulk_pressure_feedback) {
-		dp1ns = 0.0;
+	double pressure_gradient = fixed_pressure_gradient;
+	if (enable_bulk_pressure_feedback) {
+		pressure_gradient = nu * (*s3tot) / nxzc / ylength;
 	}
+	double dp1ns = pressure_gradient * rk[ns].alpha;
 
 	int ic = blockIdx.x * blockDim.x + threadIdx.x;
 	int jc = blockIdx.y * blockDim.y + threadIdx.y + 1;
@@ -1236,7 +1238,9 @@ void calcuate()
 
 		for (int ns = 0; ns < 3; ns++)
 		{
-			CHECK_CUDA(cudaMemcpy(s3tot, &zero, sizeof(double), cudaMemcpyHostToDevice));
+			if (enable_bulk_pressure_feedback) {
+				CHECK_CUDA(cudaMemcpy(s3tot, &zero, sizeof(double), cudaMemcpyHostToDevice));
+			}
             /*修改时间补偿*/
             double t_current = t_stage_start;
             double t_next    = t_current + rk[ns].alpha;
@@ -1322,10 +1326,12 @@ void calcuate()
 
 			/*update*/
 
-			CHECK_CUDA(cudaMemcpy(&s3tot_host, s3tot, sizeof(double), cudaMemcpyDeviceToHost));
+			double stage_pressure_gradient = fixed_pressure_gradient;
 			if (enable_bulk_pressure_feedback) {
-				prgradaver += nu * (s3tot_host) / nxzc / ylength * rk[ns].alpha / dt;
+				CHECK_CUDA(cudaMemcpy(&s3tot_host, s3tot, sizeof(double), cudaMemcpyDeviceToHost));
+				stage_pressure_gradient = nu * s3tot_host / nxzc / ylength;
 			}
+			prgradaver += stage_pressure_gradient * rk[ns].alpha / dt;
 
 			t_stage_start = t_next;
 
