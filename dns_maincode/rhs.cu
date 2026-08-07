@@ -6,15 +6,12 @@
 #include "cuda_runtime.h"
 #include "cuda.h"
 #include <iostream>
-#include <fstream>   
 #include "device_launch_parameters.h"
-#include <direct.h>
 
-#include "src/parameters.h"
-#include "src/init.cuh"
-#include "src/rhs.cuh"
+#include "parameters.h"
+#include "init.cuh"
+#include "rhs.cuh"
 
-#include "cusparse.h"
 #include "cufft.h"
 
 
@@ -136,7 +133,9 @@ __global__ void rhsx(fluid* flu, process_variables* var, dyDir* dydir, Ypara* yp
 			dzzcoe5 * flu[d_Ord3(ic, jc, ku, nzp, nxp)].u;
 
 		double dcq13 = d11q1 + d33q1;
-		atomicAdd(s3tot, (dcq13 + d22q1) * dydir[jc].dyp);
+		if (enable_bulk_pressure_feedback) {
+			atomicAdd(s3tot, (dcq13 + d22q1) * dydir[jc].dyp);
+		}
 		//atomicAdd(s3tot, dcq13);
 
 		double convEd1 = -h11 - h12 - h13 + nu * dcq13;
@@ -309,9 +308,13 @@ __global__ void rhsy(fluid* flu, process_variables* var, dyDir* dydir, Ypara* yp
 	}
 }
 
-__global__ void correct_rhsx(fluid* flu, process_variables* var, dyDir* dydir, Ypara* ypara, double* s3tot, int ns, RK* rk)  //in dp1ns there is the mean pressure gradient to keep constant mass
+__global__ void correct_rhsx(fluid* flu, process_variables* var, dyDir* dydir, Ypara* ypara, double* s3tot, int ns, RK* rk)  
 {
-	double dp1ns = nu * (*s3tot) / nxzc / ylength * rk[ns].alpha;
+	double pressure_gradient = fixed_pressure_gradient;
+	if (enable_bulk_pressure_feedback) {
+		pressure_gradient = nu * (*s3tot) / nxzc / ylength;
+	}
+	double dp1ns = pressure_gradient * rk[ns].alpha;
 
 	int ic = blockIdx.x * blockDim.x + threadIdx.x;
 	int jc = blockIdx.y * blockDim.y + threadIdx.y + 1;
@@ -321,15 +324,12 @@ __global__ void correct_rhsx(fluid* flu, process_variables* var, dyDir* dydir, Y
 	{
 		var[d_Ord3(ic, jc, kc, nzp, nxp)].rhsx = var[d_Ord3(ic, jc, kc, nzp, nxp)].rhsx - dp1ns;
 
-		//if (ic == 100 && jc == 100) {
-		//	printf("i %d: k[%d] j[%d] ns[%d]=      %f,        %f,       %f\n", ic, kc, jc, ns, dp1ns, s3tot, *s3tot);
-		//}
 	}
 }
 
 
 /*uhat*/
-__global__ void uhat_coe(process_variables* var, Ypara* ypara, int ns, double* a, double* b, double* c, double* d, int k, RK* rk)
+__global__ void uhat_coe(process_variables* var, Ypara* ypara, int ns, double* a, double* b, double* c, double* d, int k, RK* rk, double dU_wall)
 {
 	int i = threadIdx.x;
 	int j = blockIdx.x;
@@ -339,19 +339,26 @@ __global__ void uhat_coe(process_variables* var, Ypara* ypara, int ns, double* a
 		b[i * nyc + j] = 1.0 - (0.5 * rk[ns].alpha * nu) * ypara[(j + 1)].ac2cForCN;
 		c[i * nyc + j] = -(0.5 * rk[ns].alpha * nu) * ypara[(j + 1)].ap2cForCN;
 		d[i * nyc + j] = var[d_Ord3(i, (j + 1), k, nzp, nxp)].rhsx;
+
+        if (j == 0) {
+			d[i * nyc + j] += ( 0.5 * rk[ns].alpha * nu) * ypara[1].am2cForCN * dU_wall;
+		}
+		
 	}
 }
 
-void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk)
+void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, RK* rk, double dU_wall, double* tri_vecm, double* tri_arrmn)
 {
 	//cusparseHandle_t handle;
 	//CHECK_CUSPARSE(cusparseCreate(&handle));
+
+
 
 	for (int k = 0; k < nzp; k++)
 	{
 		//size_t bufferSize;
 		//void* buffer = nullptr;
-		uhat_coe << <nyc, nxp >> > (var, ypara, ns, a, b, c, d, k, rk);
+		uhat_coe << <nyc, nxp >> > (var, ypara, ns, a, b, c, d, k, rk, dU_wall);
 
 		//if (ns == 1)
 		//{
@@ -362,19 +369,18 @@ void uhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, doubl
 		//		std::cout << temp[i + 2*nxp] << std::endl;
 		//	}		
 		//}
-
 		//CHECK_CUSPARSE(cusparseDgtsv2StridedBatch_bufferSizeExt(handle, nyc, a, b, c, d, nxp, nyc, &bufferSize));
 		//CHECK_CUDA(cudaMalloc(&buffer, bufferSize));
 		//CHECK_CUSPARSE(cusparseDgtsv2StridedBatch(handle, nyc, a, b, c, d, nxp, nyc, buffer));
 		//uhat_update << <nyc, nxp >> > (flu, d, k);
 		//CHECK_CUDA(cudaFree(buffer));
 
-		InverseTridiagonalDevice(nxp, nyc, a, b, c, d);
+		InverseTridiagonalDevice(nxp, nyc, a, b, c, d, tri_vecm, tri_arrmn);
 		uhat_update << <nyc, nxp >> > (flu, d, k);
 
 
 
-		cudaDeviceSynchronize();
+		CHECK_CUDA(cudaDeviceSynchronize());
 	}
 	//CHECK_CUSPARSE(cusparseDestroy(handle));
 }
@@ -412,7 +418,7 @@ __global__ void vhat_coe(process_variables* var, Ypara* ypara, int ns, double* a
 	}
 }
 
-void vhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk)
+void vhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, RK* rk, double* tri_vecm, double* tri_arrmn)
 {
 	//cusparseHandle_t handle;
 	//CHECK_CUSPARSE(cusparseCreate(&handle));
@@ -439,11 +445,11 @@ void vhat_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, doubl
 		//CHECK_CUDA(cudaFree(buffer));
 
 
-		InverseTridiagonalDevice(nxp, nyc, a, b, c, d);
+		InverseTridiagonalDevice(nxp, nyc, a, b, c, d, tri_vecm, tri_arrmn);
 		vhat_update << <nyc, nxp >> > (flu, d, k);
 
 
-		cudaDeviceSynchronize();
+		CHECK_CUDA(cudaDeviceSynchronize());
 
 
 	}
@@ -475,7 +481,7 @@ __global__ void what_coe(process_variables* var, Ypara* ypara, int ns, double* a
 	}
 }
 
-void what_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, cusparseHandle_t handle, RK* rk)
+void what_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, double* b, double* c, double* d, int ns, RK* rk, double* tri_vecm, double* tri_arrmn)
 {
 	//cusparseHandle_t handle;
 	//CHECK_CUSPARSE(cusparseCreate(&handle));
@@ -491,11 +497,11 @@ void what_clc(fluid* flu, process_variables* var, Ypara* ypara, double* a, doubl
 		//what_update << <nyc, nxp >> > (flu, d, k);
 		//CHECK_CUDA(cudaFree(buffer));
 
-		InverseTridiagonalDevice(nxp, nyc, a, b, c, d);
+		InverseTridiagonalDevice(nxp, nyc, a, b, c, d, tri_vecm, tri_arrmn);
 		what_update << <nyc, nxp >> > (flu, d, k);
 
 
-		cudaDeviceSynchronize();
+		CHECK_CUDA(cudaDeviceSynchronize());
 	}
 	//CHECK_CUSPARSE(cusparseDestroy(handle));
 }
@@ -532,9 +538,13 @@ __global__ void clcprsrc(fluid* flu, process_variables* var, dyDir* dydir, int n
 	if (ic == nxp - 2) { ip = nxp - 1; iu = 0; }
 	if (kc == nzp - 2) { kp = nzp - 1; ku = 0; }
 
+	if (ic >= nxp || jc > nyp || kc >= nzp) {
+		return;
+	}
+
 	prsrc[d_Ord3(ic, jc, kc, nzp, nxp)].y = 0.0;
 
-	if (ic >= 0 && ic < nxp && jc >= 1 && jc < nyp && kc >= 0 && kc < nzp) {
+	if (jc >= 1 && jc < nyp) {
 		double dudx = dxcoe1 * flu[d_Ord3(im, jc, kc, nzp, nxp)].u +
 			dxcoe2 * flu[d_Ord3(ic, jc, kc, nzp, nxp)].u +
 			dxcoe3 * flu[d_Ord3(ip, jc, kc, nzp, nxp)].u +
@@ -747,7 +757,7 @@ __global__ void clcPPE(fluid* flu, process_variables* var, Ypara* ypara, double*
 
 }
 
-void clcPPE_1025(Ypara* ypara, double* ak1, double* ak3, cufftDoubleComplex* prsrc, double* a, double* b, double* c, double* d, double* e, cusparseHandle_t handle)
+void clcPPE_1025(Ypara* ypara, double* ak1, double* ak3, cufftDoubleComplex* prsrc, double* a, double* b, double* c, double* d, double* e, double* tri_vecm, double* tri_arrmn)
 {
 	for (int k = 0; k < nzp; k++)
 	{
@@ -765,11 +775,11 @@ void clcPPE_1025(Ypara* ypara, double* ak1, double* ak3, cufftDoubleComplex* prs
 		//CHECK_CUDA(cudaMalloc(&buffer2, bufferSize));
 		//CHECK_CUSPARSE(cusparseDgtsv2StridedBatch(handle, nyc, a, b, c, e, nxp, nyc, buffer2));
 		//CHECK_CUDA(cudaFree(buffer2));
-		InverseTridiagonalDevice(nxp, nyc, a, b, c, d);
-		InverseTridiagonalDevice(nxp, nyc, a, b, c, e);
+		InverseTridiagonalDevice(nxp, nyc, a, b, c, d, tri_vecm, tri_arrmn);
+		InverseTridiagonalDevice(nxp, nyc, a, b, c, e, tri_vecm, tri_arrmn);
 
 		clcPPE_update << <nyc, nxp >> > (prsrc, d, e, k);
-		cudaDeviceSynchronize();
+		CHECK_CUDA(cudaDeviceSynchronize());
 	}
 }
 
@@ -853,10 +863,9 @@ __global__ void update_velocity(fluid* flu, dyDir* dydir, RK* rk, int ns, cufftD
 	if (ic == nxp - 2) { ip = nxp - 1; iu = 0; }
 	if (kc == nzp - 2) { kp = nzp - 1; ku = 0; }
 
-	double sucac = dydir[jc].rdyc;
-	double dpdy = 0.0;
-
 	if (kc < nzp && jc <= nyc && ic < nxp) {
+		double sucac = dydir[jc].rdyc;
+		double dpdy = 0.0;
 		double dpdx = dxcoe1 * prsrc[d_Ord3(is, jc, kc, nzp, nxp)].x +
 			dxcoe2 * prsrc[d_Ord3(im, jc, kc, nzp, nxp)].x +
 			dxcoe3 * prsrc[d_Ord3(ic, jc, kc, nzp, nxp)].x +
@@ -904,10 +913,9 @@ __global__ void update_v_dir_velocity(fluid* flu, dyDir* dydir, RK* rk, int ns, 
 	//if (ic == nxp - 2) { ip = nxp - 1; iu = 0; }
 	//if (kc == nzp - 2) { kp = nzp - 1; ku = 0; }
 
-	double sucac = dydir[jc].rdyc;
-	double dpdy = 0.0;
-
 	if (kc < nzp && jc <= nyc && ic < nxp) {
+		double sucac = dydir[jc].rdyc;
+		double dpdy = 0.0;
 
 		dpdy = (prsrc[d_Ord3(ic, jc, kc, nzp, nxp)].x - prsrc[d_Ord3(ic, jm, kc, nzp, nxp)].x) * sucac;
 
@@ -937,76 +945,38 @@ __global__ void update_pressure(fluid* flu, Ypara* ypara, RK* rk, int ns, cufftD
 	if (kc == nzp - 2) { kp = nzp - 1; ku = 0; }
 	if (ic == nxp - 2) { ip = nxp - 1; iu = 0; }
 
-	double betap = -0.5 * rk[ns].alpha * nu * ypara[jc].ap2ph;
-	double betac = -0.5 * rk[ns].alpha * nu * ypara[jc].ac2ph + 1.0;
-	double betam = -0.5 * rk[ns].alpha * nu * ypara[jc].am2ph;
-
 	//if (kc == 100 && ic == 100) {
 	//	printf("i %d: k[%d] = %f, %f\n", ic, kc, prsrc[d_Ord3(ic, jc, kc, nzp, nxp)].x, prsrc[d_Ord3(ic, jc, kc, nzp, nxp)].y);
 	//}
 
 	if (kc < nzp && jc <= (nyp - 1) && ic < nxp) {
+		double betap = -0.5 * rk[ns].alpha * nu * ypara[jc].ap2ph;
+		double betac = -0.5 * rk[ns].alpha * nu * ypara[jc].ac2ph + 1.0;
+		double betam = -0.5 * rk[ns].alpha * nu * ypara[jc].am2ph;
 		flu[d_Ord3(ic, jc, kc, nzp, nxp)].p = flu[d_Ord3(ic, jc, kc, nzp, nxp)].p + (betap * prsrc[d_Ord3(ic, jp, kc, nzp, nxp)].x + betac * prsrc[d_Ord3(ic, jc, kc, nzp, nxp)].x + betam * prsrc[d_Ord3(ic, jm, kc, nzp, nxp)].x);
 	}
 
 }
 
-__global__ void bc_velocity(fluid* flu)
+__global__ void bc_velocity(fluid* flu, double current_time)
 {
 	int ic = threadIdx.x;
 	int kc = blockIdx.x;
 
 	if (kc < nzp && ic < nxp) {
 
-		//flu[d_Ord3(ic, nyc, kc, nzp, nxp)].v = 0.0;//nyc?
-	    flu[d_Ord3(ic, nyp, kc, nzp, nxp)].v = 0.0; //nyp是上壁面
-		flu[d_Ord3(ic, 1, kc, nzp, nxp)].v = 0.0;  //1是下壁面
+		// 顶部：自由滑移/零梯度
+		flu[d_Ord3(ic, nyp, kc, nzp, nxp)].v = 0.0; 
+		flu[d_Ord3(ic, nyp, kc, nzp, nxp)].u = flu[d_Ord3(ic, nyc, kc, nzp, nxp)].u;
+		flu[d_Ord3(ic, nyp, kc, nzp, nxp)].w = flu[d_Ord3(ic, nyc, kc, nzp, nxp)].w;
 
-		flu[d_Ord3(ic, nyp, kc, nzp, nxp)].u = -2.0 * uCRF - flu[d_Ord3(ic, nyc, kc, nzp, nxp)].u;
-		flu[d_Ord3(ic, 0, kc, nzp, nxp)].u = -2.0 * uCRF - flu[d_Ord3(ic, 1, kc, nzp, nxp)].u;
-
-		flu[d_Ord3(ic, nyp, kc, nzp, nxp)].w = -flu[d_Ord3(ic, nyc, kc, nzp, nxp)].w;
+		// 底部：静止或 Stokes 震荡壁面
+		flu[d_Ord3(ic, 1, kc, nzp, nxp)].v = 0.0; 
+		double u_wall = enable_wall_oscillation ? U_osc * sin(omega * current_time) - uCRF : -uCRF;
+		flu[d_Ord3(ic, 0, kc, nzp, nxp)].u = 2.0 * u_wall - flu[d_Ord3(ic, 1, kc, nzp, nxp)].u;
 		flu[d_Ord3(ic, 0, kc, nzp, nxp)].w = -flu[d_Ord3(ic, 1, kc, nzp, nxp)].w;
 	}
 }
-
-
-/*逻辑：下壁面吹入 (+v)，上壁面吸出 (+v)，形成全场穿透流*/
-/* 
-
-__global__ void bc_velocity(fluid* flu, double time)
-{
-    // 获取当前线程对应的网格索引
-    int ic = threadIdx.x;
-    int kc = blockIdx.x;
-
-    // 只有在有效网格范围内才执行
-    if (kc < nzp && ic < nxp) {
-
-        flu[d_Ord3(ic, nyp, kc, nzp, nxp)].u = -2.0 * uCRF - flu[d_Ord3(ic, nyc, kc, nzp, nxp)].u;
-        flu[d_Ord3(ic, 0, kc, nzp, nxp)].u   = -2.0 * uCRF - flu[d_Ord3(ic, 1, kc, nzp, nxp)].u;
-
-        flu[d_Ord3(ic, nyp, kc, nzp, nxp)].w = -flu[d_Ord3(ic, nyc, kc, nzp, nxp)].w;
-        flu[d_Ord3(ic, 0, kc, nzp, nxp)].w   = -flu[d_Ord3(ic, 1, kc, nzp, nxp)].w;
-
-        // ==========================================
-        // 2. 垂直方向速度 (v) - 修改为均匀吹吸 (Uniform Blowing/Suction)
-        // ==========================================
-        // 获取我们在 parameters.h 里定义的吹气速度
-        double v_bc = V_wall_blowing;
-
-        // [下壁面 Bottom]: 吹气 (Blowing)
-        // 在 y 轴正向坐标系中，底部向上吹气意味着 v 为正值
-        flu[d_Ord3(ic, 1, kc, nzp, nxp)].v = v_bc;
-
-        // [上壁面 Top]: 吸气 (Suction)
-        // 上壁面边界同样设置正值 v。
-        // 因为 v > 0 在顶部意味着流体顺着 y 轴方向流出计算域（吸走）。
-        // 这样进出质量平衡：进多少(Bottom)，出多少(Top)。
-        flu[d_Ord3(ic, nyp, kc, nzp, nxp)].v = v_bc;
-    }
-}
-*/
 
 __global__ void bc_presure(fluid* flu)
 {
@@ -1068,23 +1038,17 @@ __global__ void BackwardSubstitution(int m, int n, double* fj, double* arrmn) {
 }
 
 // ��������ֻ���� GPU ����������
-void InverseTridiagonalDevice(int m, int n, double* aj, double* bj, double* cj, double* fj) {
-
-	double* d_vecm, * d_arrmn;
-	cudaMalloc((void**)&d_vecm, m * sizeof(double));
-	cudaMalloc((void**)&d_arrmn, m * n * sizeof(double));
-
+void InverseTridiagonalDevice(int m, int n, double* aj, double* bj, double* cj, double* fj, double* vecm, double* arrmn) {
 	int threadsPerBlock = 1024;
 	int blocksPerGrid = (m + threadsPerBlock - 1) / threadsPerBlock;
 
-	ForwardElimination << <blocksPerGrid, threadsPerBlock >> > (m, n, aj, bj, cj, fj, d_vecm, d_arrmn);
-	cudaDeviceSynchronize();
+	// ǰ����ȥ
+	ForwardElimination << <blocksPerGrid, threadsPerBlock >> > (m, n, aj, bj, cj, fj, vecm, arrmn);
+	CHECK_CUDA(cudaDeviceSynchronize());
 
-	BackwardSubstitution << <blocksPerGrid, threadsPerBlock >> > (m, n, fj, d_arrmn);
-	cudaDeviceSynchronize();
-	
-	cudaFree(d_vecm);
-	cudaFree(d_arrmn);
+	// ����ش�
+	BackwardSubstitution << <blocksPerGrid, threadsPerBlock >> > (m, n, fj, arrmn);
+	CHECK_CUDA(cudaDeviceSynchronize());
 }
 
 __global__ void average_xz(fluid* flu, dyDir* dydir, Stat* stat, int nx, int ny, int nz) {
@@ -1208,6 +1172,7 @@ void calcuate()
 	double* s3tot;
 
 	double* aa, * bb, * cc, * dd;
+	double* tri_vecm, * tri_arrmn;
 
 	double* pp; //for the image of prsrc
 
@@ -1217,31 +1182,33 @@ void calcuate()
 	//cudaMemcpy(s3tot, &zero, sizeof(double), cudaMemcpyHostToDevice);
 
 	CHECK_CUDA(cudaMalloc((void**)&s3tot, sizeof(double)));
-	CHECK_CUDA(cudaMallocManaged(&uxhx, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
-	CHECK_CUDA(cudaMallocManaged(&uyhx, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
-	CHECK_CUDA(cudaMallocManaged(&uzhx, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
-	CHECK_CUDA(cudaMallocManaged(&uxhz, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
-	CHECK_CUDA(cudaMallocManaged(&uyhz, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
-	CHECK_CUDA(cudaMallocManaged(&uzhz, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
+	CHECK_CUDA(cudaMalloc((void**)&uxhx, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
+	CHECK_CUDA(cudaMalloc((void**)&uyhx, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
+	CHECK_CUDA(cudaMalloc((void**)&uzhx, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
+	CHECK_CUDA(cudaMalloc((void**)&uxhz, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
+	CHECK_CUDA(cudaMalloc((void**)&uyhz, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
+	CHECK_CUDA(cudaMalloc((void**)&uzhz, static_cast<size_t>(nxp) * static_cast<size_t>(nyp + 1) * static_cast<size_t>(nzp) * sizeof(double)));
 
 	CHECK_CUDA(cudaMalloc((void**)&aa, static_cast<size_t>(nxp) * static_cast<size_t>(nyc) * sizeof(double)));
 	CHECK_CUDA(cudaMalloc((void**)&bb, static_cast<size_t>(nxp) * static_cast<size_t>(nyc) * sizeof(double)));
 	CHECK_CUDA(cudaMalloc((void**)&cc, static_cast<size_t>(nxp) * static_cast<size_t>(nyc) * sizeof(double)));
 	CHECK_CUDA(cudaMalloc((void**)&dd, static_cast<size_t>(nxp) * static_cast<size_t>(nyc) * sizeof(double)));
 	CHECK_CUDA(cudaMalloc((void**)&pp, static_cast<size_t>(nxp) * static_cast<size_t>(nyc) * sizeof(double)));
+	CHECK_CUDA(cudaMalloc((void**)&tri_vecm, static_cast<size_t>(nxp) * sizeof(double)));
+	CHECK_CUDA(cudaMalloc((void**)&tri_arrmn, static_cast<size_t>(nxp) * static_cast<size_t>(nyc) * sizeof(double)));
 
 	double* divmax;
-	cudaMalloc((void**)&divmax, sizeof(double));
+	CHECK_CUDA(cudaMalloc((void**)&divmax, sizeof(double)));
 
-	cudaMalloc(&ak1, static_cast<size_t>(nxp) * sizeof(double));
-	cudaMalloc(&ak3, static_cast<size_t>(nzp) * sizeof(double));
+	CHECK_CUDA(cudaMalloc((void**)&ak1, static_cast<size_t>(nxp) * sizeof(double)));
+	CHECK_CUDA(cudaMalloc((void**)&ak3, static_cast<size_t>(nzp) * sizeof(double)));
 	initPPE(ak1, ak3);//�޵�����ȥ
 
 	cufftHandle plan;
 	int nn[2];
 	nn[0] = nzp;
 	nn[1] = nxp;
-	cufftPlanMany(&plan, 2, nn, NULL, 1, nxp * nzp, NULL, 1, nxp * nzp, CUFFT_Z2Z, nyp + 1);
+	CHECK_CUFFT(cufftPlanMany(&plan, 2, nn, NULL, 1, nxp * nzp, NULL, 1, nxp * nzp, CUFFT_Z2Z, nyp + 1));
 
 	dim3 blockDim(8, 8, 8); // ÿ���߳̿��е��߳���
 	dim3 gridDim((nxp + blockDim.x - 1) / blockDim.x,
@@ -1254,28 +1221,46 @@ void calcuate()
 
 	double prgradaver = 0.0, s3tot_host = 0.0;
 
-	cusparseHandle_t handle;
-	CHECK_CUSPARSE(cusparseCreate(&handle));
-
 	clock_t start, finish;
 
 	start = clock();
-	for (int t = 0; t <= timemax; t++)
+	const int oscillation_start_step = restart_continues_oscillation_time ? restart_start_step : 0;
+	bc_velocity << < nzp, nxp >> > (flu, oscillation_start_step * dt);
+	CHECK_CUDA(cudaDeviceSynchronize());
+
+	for (int t = 0; t < timemax; t++)
 	{
+        // 计算当前物理时间，用于传递给含时边界
+		const int oscillation_step_start = oscillation_start_step + t;
+		double t_stage_start = oscillation_step_start * dt;
 
 		for (int ns = 0; ns < 3; ns++)
 		{
-			CHECK_CUDA(cudaMemcpy(s3tot, &zero, sizeof(double), cudaMemcpyHostToDevice));
+			if (enable_bulk_pressure_feedback) {
+				CHECK_CUDA(cudaMemcpy(s3tot, &zero, sizeof(double), cudaMemcpyHostToDevice));
+			}
+            /*修改时间补偿*/
+            double t_current = t_stage_start;
+            double t_next    = t_current + rk[ns].alpha;
+
+			// 关闭震荡时 dU_wall 为零，CN 移动壁面补偿自动失效。
+			double dU_wall = 0.0;
+			if (enable_wall_oscillation) {
+				double u_wall_current = U_osc * sin(omega * t_current) - uCRF;
+				double u_wall_next = U_osc * sin(omega * t_next) - uCRF;
+				dU_wall = u_wall_next - u_wall_current;
+			}
+			/*修改时间补偿*/
 
 			Update_VelInterp_uvw << < gridDim, blockDim >> > (flu, uxhx, uyhx, uzhx, uxhz, uyhz, uzhz);  //flu ��Ҫ��gpu�϶���
 			rhsx << < gridDim, blockDim >> > (flu, var, dydir_device, ypara_device, uxhx, uyhx, uzhx, uxhz, uyhz, uzhz, ns, s3tot, rk_device);
 			rhsy << < gridDim, blockDim >> > (flu, var, dydir_device, ypara_device, uxhx, uyhx, uzhx, uxhz, uyhz, uzhz, ns, rk_device);
 			rhsz << < gridDim, blockDim >> > (flu, var, dydir_device, ypara_device, uxhx, uyhx, uzhx, uxhz, uyhz, uzhz, ns, rk_device);
-			cudaDeviceSynchronize();
+			CHECK_CUDA(cudaDeviceSynchronize());
 
 			correct_rhsx << < gridDim, blockDim >> > (flu, var, dydir_device, ypara_device, s3tot, ns, rk_device);
 
-			cudaDeviceSynchronize();
+			CHECK_CUDA(cudaDeviceSynchronize());
 			//for (int k = 0; k < nzp; k++)
 			//{
 			//	uhat_coe << <nyc, nxp >> > (var, ypara_device, ns, aa, bb, cc, dd, k, rk_device); cudaDeviceSynchronize();
@@ -1293,11 +1278,14 @@ void calcuate()
 			//	CHECK_CUDA(cudaFree(buffer));
 			//}
 
-			uhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device);
-			what_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device);
-			vhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, handle, rk_device);
+            /*修改真实速度*/
+			uhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, rk_device, dU_wall, tri_vecm, tri_arrmn);
+			/*修改真实速度*/
+			what_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, rk_device, tri_vecm, tri_arrmn);
+			vhat_clc(flu, var, ypara_device, aa, bb, cc, dd, ns, rk_device, tri_vecm, tri_arrmn);
 
-			bc_velocity << < nzp, nxp >> > (flu);
+			bc_velocity << < nzp, nxp >> > (flu, t_next);
+			CHECK_CUDA(cudaDeviceSynchronize());
 
 			/*吹吸边界条件*/
             /*
@@ -1307,18 +1295,18 @@ void calcuate()
 			
 
 			/*PPE*/
-			cudaMemcpy(divmax, &zero, sizeof(double), cudaMemcpyHostToDevice);
+			CHECK_CUDA(cudaMemcpy(divmax, &zero, sizeof(double), cudaMemcpyHostToDevice));
 
 
 			clcprsrc << < gridDim, blockDim >> > (flu, var, dydir_device, ns, divmax, rk_device, prsrc);
 
-			CHECK_CUFFT(cufftExecZ2Z(plan, (cufftDoubleComplex*)prsrc, (cufftDoubleComplex*)prsrc, CUFFT_FORWARD)); cudaDeviceSynchronize();
+			CHECK_CUFFT(cufftExecZ2Z(plan, (cufftDoubleComplex*)prsrc, (cufftDoubleComplex*)prsrc, CUFFT_FORWARD)); CHECK_CUDA(cudaDeviceSynchronize());
 
-			clcPPE_1025(ypara_device, ak1, ak3, prsrc, aa, bb, cc, dd, pp, handle);
+			clcPPE_1025(ypara_device, ak1, ak3, prsrc, aa, bb, cc, dd, pp, tri_vecm, tri_arrmn);
 
 			//clcPPE << < nzp, nxp >> > (flu, var, ypara_device, ak1, ak3, prsrc); cudaDeviceSynchronize();
 
-			CHECK_CUFFT(cufftExecZ2Z(plan, (cufftDoubleComplex*)prsrc, (cufftDoubleComplex*)prsrc, CUFFT_INVERSE)); cudaDeviceSynchronize();
+			CHECK_CUFFT(cufftExecZ2Z(plan, (cufftDoubleComplex*)prsrc, (cufftDoubleComplex*)prsrc, CUFFT_INVERSE)); CHECK_CUDA(cudaDeviceSynchronize());
 			bc_prsrc << < nzp, nxp >> > (prsrc);
 			/*PPE*/
 
@@ -1327,42 +1315,53 @@ void calcuate()
 			/*update*/
 			update_velocity << < gridDim, blockDim >> > (flu, dydir_device, rk_device, ns, prsrc);
 			//update_v_dir_velocity << < gridDim, blockDim >> > (flu, dydir_device, rk_device, ns, prsrc);
-			update_pressure << < gridDim, blockDim >> > (flu, ypara_device, rk_device, ns, prsrc); cudaDeviceSynchronize();
+			update_pressure << < gridDim, blockDim >> > (flu, ypara_device, rk_device, ns, prsrc); CHECK_CUDA(cudaDeviceSynchronize());
 
-			bc_presure << < nzp, nxp >> > (flu); cudaDeviceSynchronize();
+			bc_presure << < nzp, nxp >> > (flu); CHECK_CUDA(cudaDeviceSynchronize());
 
-			bc_velocity << < nzp, nxp >> > (flu);
-
-			/*吹吸边界条件*/
-            /*
-            bc_velocity << < nzp, nxp >> > (flu, current_time);
-			*/
-
+			bc_velocity << < nzp, nxp >> > (flu, t_next);
+			CHECK_CUDA(cudaDeviceSynchronize());
 
 			/*update*/
 
-			CHECK_CUDA(cudaMemcpy(&s3tot_host, s3tot, sizeof(double), cudaMemcpyDeviceToHost));
-			prgradaver += nu * (s3tot_host) / nxzc / ylength * rk[ns].alpha / dt;
+			double stage_pressure_gradient = fixed_pressure_gradient;
+			if (enable_bulk_pressure_feedback) {
+				CHECK_CUDA(cudaMemcpy(&s3tot_host, s3tot, sizeof(double), cudaMemcpyDeviceToHost));
+				stage_pressure_gradient = nu * s3tot_host / nxzc / ylength;
+			}
+			prgradaver += stage_pressure_gradient * rk[ns].alpha / dt;
+
+			t_stage_start = t_next;
 
 		}
 
 
-		printf("%d     prgrad= %f \n", t, prgradaver);
+		const int completed_step = restart_start_step + t + 1;
+		const double completed_time = (oscillation_start_step + t + 1) * dt;
+
+		if (completed_step % stat_output_interval == 0) {
+			printf("%d     prgrad= %f \n", completed_step, prgradaver);
+		}
 #ifdef  Restart
 		if (t % 1 == 0)
 		{
 			output_prgrad(prgradaver);
 			prgradaver = 0.0;
 		}
-		if (t % 10 == 0 && t <= timemax && t > 0)
+		if (completed_step % stat_output_interval == 0)
 		{
-			//output_velocity(flu, flu_host, t);
-			clcstat(flu);
+			clcstat(flu, completed_time, completed_step);
 		}
-		if (t != 0 && t % 5000 == 0 && t <= timemax)
+		if (output_field_files &&
+			(field_output_start_step < 0 || completed_step >= field_output_start_step) &&
+			(field_output_end_step < 0 || completed_step <= field_output_end_step) &&
+			completed_step % field_output_interval == 0)
 		{
-			//output_velocity(flu, flu_host, t);
-			output_restart(flu, flu_host, var);
+			output_velocity(flu, flu_host, completed_step);
+		}
+		if (completed_step % restart_output_interval == 0 || t + 1 == timemax)
+		{
+			output_restart(flu, flu_host, var, completed_step);
 		}
 #else
 		if (t % 1 == 0)
@@ -1370,19 +1369,22 @@ void calcuate()
 			output_prgrad(prgradaver);
 			prgradaver = 0.0;
 		}
-		//if (t % 500 == 0 && t >= 5000 && t < timemax)
-		//{
-		//	output_velocity(flu, flu_host, t);
-		//}
-		if (t % 10 == 0 && t <= timemax)
+		if (completed_step % stat_output_interval == 0)
 		{
-			clcstat(flu);
+			clcstat(flu, completed_time, completed_step);
 		}
-		if (t != 0 && t % 5000 == 0 && t <= timemax)
+		if (output_field_files &&
+			(field_output_start_step < 0 || completed_step >= field_output_start_step) &&
+			(field_output_end_step < 0 || completed_step <= field_output_end_step) &&
+			completed_step % field_output_interval == 0)
 		{
-			//output_velocity(flu, flu_host, t);
-			output_restart(flu, flu_host, var);
+			output_velocity(flu, flu_host, completed_step);
 		}
+		if (completed_step % restart_output_interval == 0 || t + 1 == timemax)
+		{
+			output_restart(flu, flu_host, var, completed_step);
+		}
+
 #endif
 	}
 
@@ -1392,18 +1394,24 @@ void calcuate()
 	//output for restart
 
 
-	CHECK_CUSPARSE(cusparseDestroy(handle));
-	cudaFree(uxhx);
-	cudaFree(uyhx);
-	cudaFree(uzhx);
-	cudaFree(uxhz);
-	cudaFree(uyhz);
-	cudaFree(uzhz);
-	cudaFree(aa);
-	cudaFree(bb);
-	cudaFree(cc);
-	cudaFree(dd);
-	cudaFree(pp);
+	CHECK_CUDA(cudaFree(uxhx));
+	CHECK_CUDA(cudaFree(uyhx));
+	CHECK_CUDA(cudaFree(uzhx));
+	CHECK_CUDA(cudaFree(uxhz));
+	CHECK_CUDA(cudaFree(uyhz));
+	CHECK_CUDA(cudaFree(uzhz));
+	CHECK_CUDA(cudaFree(s3tot));
+	CHECK_CUDA(cudaFree(aa));
+	CHECK_CUDA(cudaFree(bb));
+	CHECK_CUDA(cudaFree(cc));
+	CHECK_CUDA(cudaFree(dd));
+	CHECK_CUDA(cudaFree(pp));
+	CHECK_CUDA(cudaFree(tri_vecm));
+	CHECK_CUDA(cudaFree(tri_arrmn));
+	CHECK_CUDA(cudaFree(divmax));
+	CHECK_CUDA(cudaFree(ak1));
+	CHECK_CUDA(cudaFree(ak3));
+	CHECK_CUFFT(cufftDestroy(plan));
 }
 
 

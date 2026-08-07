@@ -6,15 +6,28 @@
 #include "cuda_runtime.h"
 #include "cuda.h"
 #include <iostream>
-#include <fstream>   
 #include "device_launch_parameters.h"
-#include <direct.h>
 
+#include <dirent.h>
 #include <random>
 
-#include "src/parameters.h"
-#include "src/init.cuh"
-#include "src/rhs.cuh"
+#include "parameters.h"
+#include "init.cuh"
+#include "rhs.cuh"
+#include "platform_compat.h"
+
+static FILE* open_file_checked(const char* filename, const char* mode)
+{
+	FILE* fp = nullptr;
+	fopen_s(&fp, filename, mode);
+	if (fp == nullptr) {
+		fprintf(stderr, "Failed to open file: %s\n", filename);
+		exit(EXIT_FAILURE);
+	}
+	return fp;
+}
+
+int restart_start_step = 0;
 
 void init_mesh_para()
 {
@@ -22,23 +35,17 @@ void init_mesh_para()
 	memset(dydir, 0, (static_cast<size_t>(nyp) + 1) * sizeof(dyDir));
 	memset(rk, 0, 3 * sizeof(RK));
 
-	/*define the dy of the no-uniform mesh both up and bottom*/
-	double tstr = sin(0.5 * PI);
-	for (int j = 1; j <= nyp / 2; j++)
+	/* 单侧双曲正切(tanh)非均匀网格划分：仅在底部(y=0)加密 */
+	double gamma_mesh = 2.0; 
+	for (int j = 1; j <= nyp; j++)
 	{
-		double xi = 2.0 * (double(j) - 1.0) / nyc - 1.0;
-		double y0 = sin(0.5 * PI * xi) + 1.0;
-		dydir[j].yp = 0.5 * y0 * ylength;
-		dydir[nyp + 1 - j].yp = ylength - dydir[j].yp;
+		double xi = (double(j) - 1.0) / nyc; 
+		dydir[j].yp = ylength * (1.0 + tanh(gamma_mesh * (xi - 1.0)) / tanh(gamma_mesh));
 	}
 	dydir[1].yp = 0.0;
 	dydir[nyp].yp = ylength;
-	if (nyp % 2 == 1)
-	{
-		dydir[nyp / 2 + 1].yp = 0.5 * ylength;
-	}
 
-	/*define para related to y-dir*/
+	/*define para related to y-dir (保留原始计算逻辑，自适应不对称)*/
 	for (int j = 1; j <= nyc; j++)
 	{
 		dydir[j].yc = 0.5 * (dydir[j].yp + dydir[j + 1].yp);
@@ -121,9 +128,6 @@ void init_mesh_para()
 		ypara_host[j].yinterpCoe = dydir[j].dyp / (dydir[j].dyp + dydir[j - 1].dyp);
 	}
 
-	//constexpr double gamma[3] = { 8.0 / 15.0 * dt , 5.0 / 12.0 * dt  ,3.0 / 4.0 * dt };//��Ҫ��gpu�϶���
-	//constexpr double theta[3] = { 0.0 * dt        ,-17.0 / 60.0 * dt ,2.0 / 15.0 * dt };
-	//constexpr double alpha[3] = { 8.0 / 15.0 * dt ,2.0 / 15.0 * dt   ,1.0 / 3.0 * dt };
 	rk[0].alpha = 8.0 / 15.0 * dt;
 	rk[1].alpha = 2.0 / 15.0 * dt;
 	rk[2].alpha = 1.0 / 3.0 * dt;
@@ -136,36 +140,27 @@ void init_mesh_para()
 	rk[1].theta = -17.0 / 60.0 * dt;
 	rk[2].theta = -5.0 / 12.0 * dt;
 
-
 	CHECK_CUDA(cudaMalloc((void**)&ypara_device, (nyp + 1) * sizeof(Ypara)));
 	CHECK_CUDA(cudaMalloc((void**)&dydir_device, (nyp + 1) * sizeof(dyDir)));
 	CHECK_CUDA(cudaMalloc((void**)&rk_device, 3 * sizeof(RK)));
-	cudaMemcpy(ypara_device, ypara_host, (nyp + 1) * sizeof(Ypara), cudaMemcpyHostToDevice);
-	cudaMemcpy(dydir_device, dydir, (nyp + 1) * sizeof(dyDir), cudaMemcpyHostToDevice);
-	cudaMemcpy(rk_device, rk, 3 * sizeof(RK), cudaMemcpyHostToDevice);
-
-	//rk[0].beta = ;
-	//rk[1].beta = ;
-	//rk[2].beta = ;
+	CHECK_CUDA(cudaMemcpy(ypara_device, ypara_host, (nyp + 1) * sizeof(Ypara), cudaMemcpyHostToDevice));
+	CHECK_CUDA(cudaMemcpy(dydir_device, dydir, (nyp + 1) * sizeof(dyDir), cudaMemcpyHostToDevice));
+	CHECK_CUDA(cudaMemcpy(rk_device, rk, 3 * sizeof(RK), cudaMemcpyHostToDevice));
 }
 
 void init_fluid(fluid* flu)
 {
-
 	int ic, jc, kc;
-
-	double height = 0.5 * ylength;
-
+	// double height = 0.5 * ylength;//全槽道
+	double height = ylength;//半槽道
+	// 当前仅初始化定来流槽道流。
 	double Re = ubulk * height / nu;
 	double Retau = 0.1538 * pow(Re, 0.887741);
 	double utau = Retau * nu / height;
 
-	//int ic = blockIdx.x * blockDim.x + threadIdx.x;
-	//int jc = blockIdx.y * blockDim.y + threadIdx.y;
-	//int kc = blockIdx.z * blockDim.z + threadIdx.z;
-
 	double uzmean[nyp] = { 0.0 };
 	double uxmean = 0.0;
+	
 	double wx = 2.0 * PI / 500.0;
 	double wz = 2.0 * PI / 200.0;
 
@@ -178,25 +173,24 @@ void init_fluid(fluid* flu)
 	wx = m1 * 2.0 * PI / xlength_plus;
 	wz = m2 * 2.0 * PI / zlength_plus;
 
-	std::random_device rd;  // ��ȡ���������
-	std::mt19937 gen(rd());  // ʹ��÷ɭ��ת�㷨�����������
-	std::uniform_real_distribution<double> dis(0.9, 1.1);  // ���ȷֲ���ΧΪ[0.9, 1.1]
+	std::random_device rd;  
+	std::mt19937 gen(rd());  
+	std::uniform_real_distribution<double> dis(0.9, 1.1);  
+
 	for (jc = 1; jc < nyp; jc++)
 	{
 		uzmean[jc] = 0.0;
-		double yct = height - abs(height - dydir[jc].yc);
+		double yct = dydir[jc].yc;
 		double ybar = yct / height;
-		double yplus = utau * yct / nu;
+		// if (ybar > 1.0) ybar = 2.0 - ybar;//全槽道
+
 		for (kc = 0; kc < nzp; kc++)
 		{
 			double zp = kc * dz + dz * 0.5;
 			double zplus = utau * zp / nu;
 			for (ic = 0; ic < nxp; ic++)
 			{
-				double random_number = dis(gen);// ���������
-				//double random_number = 1.0;
-
-
+				double random_number = dis(gen);
 				double xp = ic * dx + dx * 0.5;
 				double xplus = utau * xp / nu;
 
@@ -204,13 +198,6 @@ void init_fluid(fluid* flu)
 				flu[Ord3(ic, jc, kc, nzp, nxp)].v = 0.0;
 				flu[Ord3(ic, jc, kc, nzp, nxp)].w = ubulk * ybar * exp(-4.5 * ybar * ybar) * sin(wx * xplus) * random_number;
 
-				//flu[Ord3(ic, jc, kc, nzp, nxp)].u = 0.0052 * ubulk * yplus * exp(-yplus * yplus / 1800.0) * cos(wz * zplus) * random_number + 3.0 * ubulk * (ybar - 0.5 * ybar * ybar);
-				//flu[Ord3(ic, jc, kc, nzp, nxp)].v = 0.0;
-				//flu[Ord3(ic, jc, kc, nzp, nxp)].w = 0.0050 * ubulk * yplus * exp(-yplus * yplus / 1800.0) * sin(wx * xplus) * random_number;
-
-				//flu[Ord3(ic, jc, kc, nzp, nxp)].uold = 0.0052 * ubulk * yplus * exp(-yplus * yplus / 1800.0) * cos(wz * zplus) + 3.0 * ubulk * (ybar - 0.5 * ybar * ybar);
-				//var[Ord3(ic, jc, kc, nzp, nxp)].vold = 0.0;
-				//flu[Ord3(ic, jc, kc, nzp, nxp)].wold = 0.0050 * ubulk * yplus * exp(-yplus * yplus / 1800.0) * sin(wx * xplus);
 				uzmean[jc] = uzmean[jc] + flu[Ord3(ic, jc, kc, nzp, nxp)].w;
 				uxmean = uxmean + flu[Ord3(ic, jc, kc, nzp, nxp)].u * dydir[jc].dyp;
 			}
@@ -221,33 +208,30 @@ void init_fluid(fluid* flu)
 
 	for (jc = 1; jc < nyp; jc++)
 	{
+
 		for (kc = 0; kc < nzp; kc++)
+		{
 			for (ic = 0; ic < nxp; ic++)
 			{
 				flu[Ord3(ic, jc, kc, nzp, nxp)].u = flu[Ord3(ic, jc, kc, nzp, nxp)].u * ubulk / uxmean - uCRF;
 				flu[Ord3(ic, jc, kc, nzp, nxp)].w = flu[Ord3(ic, jc, kc, nzp, nxp)].w - uzmean[jc];
-
-				//var[d_Ord3(ic, jc, kc, nzp, nxp)].uold = flu[d_Ord3(ic, jc, kc, nzp, nxp)].u;
-				//var[d_Ord3(ic, jc, kc, nzp, nxp)].wold = flu[d_Ord3(ic, jc, kc, nzp, nxp)].w;
 			}
+		}
 	}
-	
-	/*bc init*/
+
+	/* 边界初始化：顶部滑移，底部静止或震荡壁面 */
 	for (kc = 0; kc < nzp; kc++)
 		for (ic = 0; ic < nxp; ic++)
 		{
-			flu[Ord3(ic, nyp, kc, nzp, nxp)].u = -2.0 * uCRF - flu[Ord3(ic, nyc, kc, nzp, nxp)].u;
-			flu[Ord3(ic, 0, kc, nzp, nxp)].u = -2.0 * uCRF - flu[Ord3(ic, 1, kc, nzp, nxp)].u;
+			flu[Ord3(ic, nyp, kc, nzp, nxp)].u = flu[Ord3(ic, nyc, kc, nzp, nxp)].u;
+			flu[Ord3(ic, nyp, kc, nzp, nxp)].w = flu[Ord3(ic, nyc, kc, nzp, nxp)].w;
+			flu[Ord3(ic, nyp, kc, nzp, nxp)].v = 0.0;  
 
-			flu[Ord3(ic, nyp, kc, nzp, nxp)].w = -flu[Ord3(ic, nyc, kc, nzp, nxp)].w;
+			double initial_u_wall = enable_wall_oscillation ? U_osc * sin(0.0) - uCRF : -uCRF;
+			flu[Ord3(ic, 0, kc, nzp, nxp)].u = 2.0 * initial_u_wall - flu[Ord3(ic, 1, kc, nzp, nxp)].u;
 			flu[Ord3(ic, 0, kc, nzp, nxp)].w = -flu[Ord3(ic, 1, kc, nzp, nxp)].w;
-
-			flu[Ord3(ic, nyp, kc, nzp, nxp)].v = 0.0;  //nyp上壁面
-			// flu[Ord3(ic, 0, kc, nzp, nxp)].v = 0.0;    //虚拟点
-			flu[Ord3(ic, 1, kc, nzp, nxp)].v = 0.0;   //1是下壁面
-
+			flu[Ord3(ic, 1, kc, nzp, nxp)].v = 0.0;   
 		}
-
 
 	for (jc = 0; jc <= nyp; jc++)
 		for (kc = 0; kc < nzp; kc++)
@@ -256,27 +240,18 @@ void init_fluid(fluid* flu)
 				flu[Ord3(ic, jc, kc, nzp, nxp)].p = 0.0;
 			}
 
-	FILE* fp = NULL;//�ļ�ָ��
-	char filename[100];//�ļ���
+	FILE* fp = NULL;
+	char filename[512];
 	char flu_name[100];
 
 	sprintf_s(flu_name, "mesh.dat");
 	sprintf_s(filename, output_path);
 	strcat_s(filename, flu_name);
-	fopen_s(&fp, filename, "w+");
+	fp = open_file_checked(filename, "w+");
 
-	for (ic = 0; ic < nxp; ic = ic + xskip)
-	{
-		fprintf(fp, "%e\n", ic * dx);
-	}
-	for (jc = 0; jc <= nyp; jc = jc + yskip)
-	{
-		fprintf(fp, "%e\n", dydir[jc].yc);
-	}
-	for (kc = 0; kc < nzp; kc = kc + zskip)
-	{
-		fprintf(fp, "%e\n", kc * dz);
-	}
+	for (ic = 0; ic < nxp; ic = ic + xskip) { fprintf(fp, "%e\n", ic * dx); }
+	for (jc = 0; jc <= nyp; jc = jc + yskip) { fprintf(fp, "%e\n", dydir[jc].yc); }
+	for (kc = 0; kc < nzp; kc = kc + zskip) { fprintf(fp, "%e\n", kc * dz); }
 
 	fclose(fp);
 }
@@ -286,34 +261,26 @@ int Ord3(int x, int y, int z, int nzp, int nxp)
 	return x + z * nxp + (nxp * nzp) * y;
 }
 
-void output_velocity(fluid* flu, fluid* flu_host, int t)
+void output_velocity(fluid* flu, fluid* flu_host, int time_step)
 {
 	int ic, jc, kc;
 	int xyzsize = nxp * (nyp + 1) * nzp;
 
 	//fluid* flu_host = (fluid*)malloc(xyzsize * sizeof(fluid));
-	cudaMemcpy(flu_host, flu, xyzsize * sizeof(fluid), cudaMemcpyDeviceToHost);
+	CHECK_CUDA(cudaMemcpy(flu_host, flu, xyzsize * sizeof(fluid), cudaMemcpyDeviceToHost));
 
 	FILE* fp = NULL;//�ļ�ָ��
-	char filename[100];//�ļ���
-	char flu_name[100];
+	char filename[512];//�ļ���
 
-#ifdef Restart
-	sprintf_s(flu_name, "restart%d.dat", t);
-#else
-	sprintf_s(flu_name, "dns_data%d.dat", t);
-#endif // Restart
+	sprintf_s(filename, sizeof(filename), "%sfield_%08d.dat", output_path, time_step);
+	fp = open_file_checked(filename, "w+");
 
-	sprintf_s(filename, output_path);
-	strcat_s(filename, flu_name);
-	fopen_s(&fp, filename, "w+");
-
-	for (jc = 0; jc <= nyp; jc = jc + yskip)
-		for (kc = 0; kc < nzp; kc = kc + zskip)
-			for (ic = 0; ic < nxp; ic = ic + xskip)
+	for (jc = 0; jc <= nyp; jc = jc + field_yskip)
+		for (kc = 0; kc < nzp; kc = kc + field_zskip)
+			for (ic = 0; ic < nxp; ic = ic + field_xskip)
 			{
 				//fprintf(fp, "%d %d %e %e %d\n", flu[i].x, flu[i].y, flu[i].ux, flu[i].uy, flu[i].type);
-				fprintf(fp, "%e %e %e %e\n", flu_host[Ord3(ic, jc, kc, nzp, nxp)].u, flu_host[Ord3(ic, jc, kc, nzp, nxp)].v, flu_host[Ord3(ic, jc, kc, nzp, nxp)].w, flu_host[Ord3(ic, jc, kc, nzp, nxp)].p);
+				fprintf(fp, "%.15e %.15e %.15e %.15e\n", flu_host[Ord3(ic, jc, kc, nzp, nxp)].u, flu_host[Ord3(ic, jc, kc, nzp, nxp)].v, flu_host[Ord3(ic, jc, kc, nzp, nxp)].w, flu_host[Ord3(ic, jc, kc, nzp, nxp)].p);
 				//fprintf(fp, "%e %e %e\n", ic * dx, dydir[jc].yc, kc * dz);
 			}
 	fclose(fp);
@@ -343,56 +310,89 @@ __global__ void init_gpu_var(fluid* flu, process_variables* var)
 void output_prgrad(double prgradaver)
 {
 	FILE* fp = NULL;//�ļ�ָ��
-	char filename[100];//�ļ���
+	char filename[512];//�ļ���
 	char flu_name[100];
 	sprintf_s(flu_name, "prgrad.dat");
 	sprintf_s(filename, output_path);
 	strcat_s(filename, flu_name);
-	fopen_s(&fp, filename, "a+");
+	fp = open_file_checked(filename, "a+");
 
 	fprintf(fp, "%e\n", prgradaver);
 
 	fclose(fp);
 }
 
-void output_restart(fluid* flu_host, process_variables* var)
+void output_restart(fluid* flu, fluid* flu_host, process_variables* var, int time_step)
 {
 	int ic, jc, kc;
 	int xyzsize = nxp * (nyp + 1) * nzp;
 
-	//fluid* flu_host = (fluid*)malloc(xyzsize * sizeof(fluid));
-	//cudaMemcpy(flu_host, flu, xyzsize * sizeof(fluid), cudaMemcpyDeviceToHost);
+	CHECK_CUDA(cudaMemcpy(flu_host, flu, xyzsize * sizeof(fluid), cudaMemcpyDeviceToHost));
 	process_variables* var_for_output = (process_variables*)malloc(xyzsize * sizeof(process_variables));
-	cudaMemcpy(var_for_output, var, xyzsize * sizeof(process_variables), cudaMemcpyDeviceToHost);
-
+	if (var_for_output == nullptr) {
+		fprintf(stderr, "Failed to allocate restart host buffer.\n");
+		exit(EXIT_FAILURE);
+	}
+	CHECK_CUDA(cudaMemcpy(var_for_output, var, xyzsize * sizeof(process_variables), cudaMemcpyDeviceToHost));
 
 	FILE* fp = NULL;//�ļ�ָ��
-	char filename[100];//�ļ���
-	char flu_name[100];
+	char filename[512];//�ļ���
 
-	sprintf_s(flu_name, "restart.dat");
-	sprintf_s(filename, output_path);
-	strcat_s(filename, flu_name);
-	fopen_s(&fp, filename, "w+");
+	sprintf_s(filename, sizeof(filename), "%srestart_%08d.dat", output_path, time_step);
+	fp = open_file_checked(filename, "w+");
 
 	for (jc = 0; jc <= nyp; jc = jc + yskip)
 		for (kc = 0; kc < nzp; kc = kc + zskip)
 			for (ic = 0; ic < nxp; ic = ic + xskip)
 			{
-				fprintf(fp, "%e %e %e %e %e %e %e\n", flu_host[Ord3(ic, jc, kc, nzp, nxp)].u, flu_host[Ord3(ic, jc, kc, nzp, nxp)].v, flu_host[Ord3(ic, jc, kc, nzp, nxp)].w, flu_host[Ord3(ic, jc, kc, nzp, nxp)].p, var_for_output[Ord3(ic, jc, kc, nzp, nxp)].uold, var_for_output[Ord3(ic, jc, kc, nzp, nxp)].vold, var_for_output[Ord3(ic, jc, kc, nzp, nxp)].wold);
+				fprintf(fp, "%.15e %.15e %.15e %.15e %.15e %.15e %.15e\n", flu_host[Ord3(ic, jc, kc, nzp, nxp)].u, flu_host[Ord3(ic, jc, kc, nzp, nxp)].v, flu_host[Ord3(ic, jc, kc, nzp, nxp)].w, flu_host[Ord3(ic, jc, kc, nzp, nxp)].p, var_for_output[Ord3(ic, jc, kc, nzp, nxp)].uold, var_for_output[Ord3(ic, jc, kc, nzp, nxp)].vold, var_for_output[Ord3(ic, jc, kc, nzp, nxp)].wold);
 			}
 	fclose(fp);
 
 	free(var_for_output);
 }
 
-void init_restart(fluid* flu, fluid* flu_host, process_variables* var)
+static void find_restart_file(char* filename, size_t filename_size)
 {
-	std::ifstream file("E:\\lch\\restart.dat");  // ���ļ�
-	if (!file) {
-		std::cerr << "Unable to open file: " << std::endl;
+	if (restart_input_step >= 0) {
+		restart_start_step = restart_input_step;
+		sprintf_s(filename, filename_size, "%srestart_%08d.dat", output_path, restart_input_step);
 		return;
 	}
+
+	int latest_step = -1;
+	char latest_name[256] = "";
+
+	DIR* dir = opendir(output_path);
+	if (dir != nullptr) {
+		struct dirent* entry = nullptr;
+		while ((entry = readdir(dir)) != nullptr) {
+			int step = -1;
+			if (sscanf(entry->d_name, "restart_%d.dat", &step) == 1 && step > latest_step) {
+				latest_step = step;
+				sprintf_s(latest_name, sizeof(latest_name), "%s", entry->d_name);
+			}
+		}
+		closedir(dir);
+	}
+
+	if (latest_step >= 0) {
+		restart_start_step = latest_step;
+		sprintf_s(filename, filename_size, "%s%s", output_path, latest_name);
+	}
+	else {
+		restart_start_step = 0;
+		sprintf_s(filename, filename_size, "%srestart.dat", output_path);
+	}
+}
+
+void init_restart(fluid* flu, fluid* flu_host, process_variables* var)
+{
+	char filename[512];
+	find_restart_file(filename, sizeof(filename));
+	std::cout << "Reading restart file: " << filename
+		<< " (restart_start_step = " << restart_start_step << ")" << std::endl;
+	FILE* file = open_file_checked(filename, "r");
 
 	int ic, jc, kc;
 	int xyzsize = nxp * (nyp + 1) * nzp;
@@ -402,24 +402,24 @@ void init_restart(fluid* flu, fluid* flu_host, process_variables* var)
 		for (kc = 0; kc < nzp; kc = kc + zskip)
 			for (ic = 0; ic < nxp; ic = ic + xskip)
 			{
-				if (!(file
-					>> flu_host[Ord3(ic, jc, kc, nzp, nxp)].u
-					>> flu_host[Ord3(ic, jc, kc, nzp, nxp)].v
-					>> flu_host[Ord3(ic, jc, kc, nzp, nxp)].w
-					>> flu_host[Ord3(ic, jc, kc, nzp, nxp)].p
-					>> var_for_input[Ord3(ic, jc, kc, nzp, nxp)].uold
-					>> var_for_input[Ord3(ic, jc, kc, nzp, nxp)].vold
-					>> var_for_input[Ord3(ic, jc, kc, nzp, nxp)].wold)
-					)
-				{
-					std::cerr << "Error reading data" << std::endl;
-					break;  // �ļ������ݲ���ʱ��ǰ�˳�
+				const int ret = fscanf(file, "%lf %lf %lf %lf %lf %lf %lf",
+					&flu_host[Ord3(ic, jc, kc, nzp, nxp)].u,
+					&flu_host[Ord3(ic, jc, kc, nzp, nxp)].v,
+					&flu_host[Ord3(ic, jc, kc, nzp, nxp)].w,
+					&flu_host[Ord3(ic, jc, kc, nzp, nxp)].p,
+					&var_for_input[Ord3(ic, jc, kc, nzp, nxp)].uold,
+					&var_for_input[Ord3(ic, jc, kc, nzp, nxp)].vold,
+					&var_for_input[Ord3(ic, jc, kc, nzp, nxp)].wold);
+				if (ret != 7) {
+					fprintf(stderr, "Error reading restart data: %s\n", filename);
+					exit(EXIT_FAILURE);
 				}
 			}
+	fclose(file);
 
 	int iu, ku;
 
-	/*�ȿ��� xskip = 2; yskip = 1; zskip = 2; ��������м򵥲�ֵ*/
+	/* Interpolate the skipped restart points for xskip = 2, yskip = 1, zskip = 2. */
 	for (jc = 0; jc <= nyp; jc = jc + yskip)
 		for (kc = 0; kc < nzp; kc = kc + zskip)
 			for (ic = 0; ic < nxp; ic = ic + xskip)
@@ -494,7 +494,7 @@ void init_restart(fluid* flu, fluid* flu_host, process_variables* var)
 	free(var_for_input);
 }
 
-void clcstat(fluid* flu)
+void clcstat(fluid* flu, double current_time, int time_step)
 {
 	int block = 256;
 	int grid = (nyp + 1 + block - 1) / block;
@@ -508,14 +508,14 @@ void clcstat(fluid* flu)
 	int jc;
  
 	FILE* fp = NULL;//�ļ�ָ��
-	char filename[100];//�ļ���
+	char filename[512];//�ļ���
 	char flu_name[100];
 
 	sprintf_s(flu_name, "stat.dat");
 
 	sprintf_s(filename, output_path);
 	strcat_s(filename, flu_name);
-	fopen_s(&fp, filename, "a+");// “a+”追加读写
+	fp = open_file_checked(filename, "a+");// “a+”追加读写
 
 	for (int ii = 0; ii < 11; ii++) {
 		for (jc = 1; jc < nyp; jc++)
@@ -523,32 +523,85 @@ void clcstat(fluid* flu)
 			switch (ii)
 			{
 			case 0:
-				fprintf(fp, "%e ", stat[jc].wx); break;
+				fprintf(fp, "%.15e ", stat[jc].wx); break;
 			case 1:
-				fprintf(fp, "%e ", stat[jc].wy); break;
+				fprintf(fp, "%.15e ", stat[jc].wy); break;
 			case 2:
-				fprintf(fp, "%e ", stat[jc].wz); break;
+				fprintf(fp, "%.15e ", stat[jc].wz); break;
 			case 3:
-				fprintf(fp, "%e ", stat[jc].um); break;
+				fprintf(fp, "%.15e ", stat[jc].um); break;
 			case 4:
-				fprintf(fp, "%e ", stat[jc].vm); break;
+				fprintf(fp, "%.15e ", stat[jc].vm); break;
 			case 5:
-				fprintf(fp, "%e ", stat[jc].wm); break;
+				fprintf(fp, "%.15e ", stat[jc].wm); break;
 			case 6:
-				fprintf(fp, "%e ", stat[jc].pm); break;
+				fprintf(fp, "%.15e ", stat[jc].pm); break;
 			case 7:
-				fprintf(fp, "%e ", stat[jc].um2); break;
+				fprintf(fp, "%.15e ", stat[jc].um2); break;
 			case 8:
-				fprintf(fp, "%e ", stat[jc].vm2); break;
+				fprintf(fp, "%.15e ", stat[jc].vm2); break;
 			case 9:
-				fprintf(fp, "%e ", stat[jc].wm2); break;
+				fprintf(fp, "%.15e ", stat[jc].wm2); break;
 			case 10:
-				fprintf(fp, "%e ", stat[jc].pm2); break;
+				fprintf(fp, "%.15e ", stat[jc].pm2); break;
 			}
 		}
 		fprintf(fp, "\n");
 	}
 	fclose(fp);
+
+	sprintf_s(flu_name, "tau_wall.dat");
+	sprintf_s(filename, output_path);
+	strcat_s(filename, flu_name);
+	fp = open_file_checked(filename, "a+");
+
+	double y1 = dydir[1].yc;
+	double y2 = dydir[2].yc;
+	double c0 = (y1 + y2) / (y1 * y2);
+	double c1 = -y2 / (y1 * (y2 - y1));
+	double c2 = y1 / (y2 * (y2 - y1));
+	double u_wall = enable_wall_oscillation ? U_osc * sin(omega * current_time) - uCRF : -uCRF;
+	double tau_fd2 = nu * (c0 * u_wall + c1 * stat[1].um + c2 * stat[2].um);
+
+	if (enable_wall_oscillation) {
+		// 保留 current_time；restart 后它仍是从震荡起点累计的物理时间。
+		fprintf(fp, "%.15e %.15e %.15e %.15e %.15e\n",
+			current_time, u_wall, tau_fd2, stat[1].um, stat[2].um);
+	}
+	else {
+		fprintf(fp, "%.15e %.15e %.15e\n", tau_fd2, stat[1].um, stat[2].um);
+	}
+	fclose(fp);
+
+	if (output_tau_wall_maps && time_step % tau_wall_map_interval == 0)
+	{
+		int xyzsize = nxp * (nyp + 1) * nzp;
+		CHECK_CUDA(cudaMemcpy(flu_host, flu, xyzsize * sizeof(fluid), cudaMemcpyDeviceToHost));
+
+		sprintf_s(flu_name, "tau_wall_map_%08d.dat", time_step);
+		sprintf_s(filename, output_path);
+		strcat_s(filename, flu_name);
+		fp = open_file_checked(filename, "w+");
+
+		if (enable_wall_oscillation) {
+			fprintf(fp, "%.15e %.15e %d %d\n", current_time, u_wall, nxp, nzp);
+		}
+		else {
+			fprintf(fp, "%d %d\n", nxp, nzp);
+		}
+		for (int kc = 0; kc < nzp; kc++)
+		{
+			for (int ic = 0; ic < nxp; ic++)
+			{
+				double u1_local = flu_host[Ord3(ic, 1, kc, nzp, nxp)].u;
+				double u2_local = flu_host[Ord3(ic, 2, kc, nzp, nxp)].u;
+				double tau_local = nu * (c0 * u_wall + c1 * u1_local + c2 * u2_local);
+				fprintf(fp, "%.15e ", tau_local);
+			}
+			fprintf(fp, "\n");
+		}
+		fclose(fp);
+	}
 
 	free(stat);
 	cudaFree(stat_dev);

@@ -6,11 +6,9 @@
 #include "cuda_runtime.h"
 #include "cuda.h"
 #include <iostream>
-#include <fstream>   
 #include "device_launch_parameters.h"
-#include <direct.h>
 
-#include "src/info_device.cuh"
+#include "info_device.cuh"
 
 void getdevice()
 {
@@ -67,9 +65,9 @@ void getdevice()
             deviceProp.maxTexture2DLayered[0], deviceProp.maxTexture2DLayered[1],
             deviceProp.maxTexture2DLayered[2]);
 
-        printf("  Total amount of constant memory:               %lu bytes\n",
+        printf("  Total amount of constant memory:               %zu bytes\n",
             deviceProp.totalConstMem);
-        printf("  Total amount of shared memory per block:       %lu bytes\n",
+        printf("  Total amount of shared memory per block:       %zu bytes\n",
             deviceProp.sharedMemPerBlock);
         printf("  Total number of registers available per block: %d\n",
             deviceProp.regsPerBlock);
@@ -87,9 +85,9 @@ void getdevice()
             deviceProp.maxGridSize[0],
             deviceProp.maxGridSize[1],
             deviceProp.maxGridSize[2]);
-        printf("  Maximum memory pitch:                          %lu bytes\n",
+        printf("  Maximum memory pitch:                          %zu bytes\n",
             deviceProp.memPitch);
-        printf("  Texture alignment:                             %lu bytes\n",
+        printf("  Texture alignment:                             %zu bytes\n",
             deviceProp.textureAlignment);
         printf("  Concurrent copy and kernel execution:          %s with %d copy engine(s)\n",
             (deviceProp.deviceOverlap ? "Yes" : "No"), deviceProp.asyncEngineCount);
