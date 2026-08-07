@@ -272,7 +272,7 @@ extern dyDir* dydir_device;
 extern RK* rk_device;
 
 
-extern char output_path[100];
+extern char output_path[512];
 
 /* restart/mesh output sampling; field output has independent field_*skip values above. */
 constexpr int xskip = 2;

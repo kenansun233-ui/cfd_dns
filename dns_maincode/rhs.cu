@@ -6,13 +6,11 @@
 #include "cuda_runtime.h"
 #include "cuda.h"
 #include <iostream>
-#include <fstream>   
 #include "device_launch_parameters.h"
-#include <direct.h>
 
-#include "src/parameters.h"
-#include "src/init.cuh"
-#include "src/rhs.cuh"
+#include "parameters.h"
+#include "init.cuh"
+#include "rhs.cuh"
 
 #include "cufft.h"
 

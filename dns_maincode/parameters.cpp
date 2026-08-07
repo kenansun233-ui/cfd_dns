@@ -1,4 +1,4 @@
-#include "src/parameters.h"
+#include "parameters.h"
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -23,5 +23,5 @@ Ypara* ypara_device;
 dyDir* dydir_device;
 RK* rk_device;
 
-char output_path[100];
+char output_path[200];
 

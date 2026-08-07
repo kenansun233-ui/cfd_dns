@@ -1,8 +1,9 @@
 #include <iostream>
-#include "src/info_device.cuh"// ����cudaͷ�ļ�
-#include "src/parameters.h"
-#include "src/init.cuh"
-#include "src/rhs.cuh"
+#include "info_device.cuh"// ����cudaͷ�ļ�
+#include "parameters.h"
+#include "init.cuh"
+#include "rhs.cuh"
+#include "platform_compat.h"
 
 
 #include "cufft.h"
@@ -17,27 +18,69 @@
 #include "cuda_runtime.h"
 #include "cuda.h"
 #include <iostream>
-#include <fstream>   
 #include "device_launch_parameters.h"
-#include <direct.h>
+#include <cerrno>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 using namespace std;
 
+static void make_dir_if_needed(const char* path)
+{
+    if (path == nullptr || path[0] == '\0') {
+        return;
+    }
 
-
-#define CHECK_CUDA(func) {                                              \
-    cudaError_t status = (func);                                        \
-    if (status != cudaSuccess) {                                        \
-        std::cerr << "CUDA API failed at line " << __LINE__             \
-                  << " with error: " << cudaGetErrorString(status)      \
-                  << std::endl;                                         \
-        exit(EXIT_FAILURE);                                             \
-    }                                                                   \
+    if (mkdir(path, 0755) != 0 && errno != EEXIST) {
+        fprintf(stderr, "Failed to create directory: %s\n", path);
+        exit(EXIT_FAILURE);
+    }
 }
 
+static void make_dirs_recursive(const char* path)
+{
+    char current[512];
+    const int written = snprintf(current, sizeof(current), "%s", path);
+    if (written < 0 || static_cast<size_t>(written) >= sizeof(current)) {
+        fprintf(stderr, "Output path is too long: %s\n", path);
+        exit(EXIT_FAILURE);
+    }
 
+    const size_t len = strlen(current);
+    if (len == 0) {
+        return;
+    }
+    if (current[len - 1] == '/') {
+        current[len - 1] = '\0';
+    }
 
-int main()
+    for (char* p = current + 1; *p != '\0'; ++p) {
+        if (*p == '/') {
+            *p = '\0';
+            make_dir_if_needed(current);
+            *p = '/';
+        }
+    }
+    make_dir_if_needed(current);
+}
+
+static void set_output_path(int argc, char** argv)
+{
+    const char* run_dir = (argc > 1 && argv[1] != nullptr && argv[1][0] != '\0') ? argv[1] : "default";
+    if (run_dir[0] == '/' || strstr(run_dir, "..") != nullptr) {
+        fprintf(stderr, "Invalid run directory: %s\n", run_dir);
+        exit(EXIT_FAILURE);
+    }
+
+    const int written = snprintf(output_path, sizeof(output_path), "./OutputFile/%s/", run_dir);
+    if (written < 0 || static_cast<size_t>(written) >= sizeof(output_path)) {
+        fprintf(stderr, "Output path is too long for run directory: %s\n", run_dir);
+        exit(EXIT_FAILURE);
+    }
+    make_dirs_recursive(output_path);
+}
+
+int main(int argc, char** argv)
 {
     /**/
     //int minGridSize; // ��С������
@@ -57,11 +100,9 @@ int main()
     //cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, 0);
     //printf("blockSize = %d   minGridSize = %d  \n maxActiveBlocks =  %d  maxConcurrentBlocks = %d", blockSize, minGridSize, maxActiveBlocks, maxActiveBlocks*numSMs);
     /**/
-    CHECK_CUDA(cudaSetDevice(1));
+    CHECK_CUDA(cudaSetDevice(0));
 
-    //sprintf(output_path, "C:\\Users\\customer\\Desktop\\DNS_0603\\");
-    sprintf(output_path, "E:\\lch\\");
-    _mkdir(output_path);
+    set_output_path(argc, argv);
 
     CHECK_CUDA(cudaMalloc((void**)&flu, nxp * (nyp + 1) * nzp * sizeof(fluid)));
     CHECK_CUDA(cudaMalloc((void**)&var, nxp * (nyp + 1) * nzp * sizeof(process_variables)));
@@ -84,7 +125,7 @@ int main()
     init_fluid(flu_host);
 #endif
 
-    char run_info_name[200];
+    char run_info_name[512];
     sprintf_s(run_info_name, "%srun_info.dat", output_path);
     FILE* run_info = nullptr;
     fopen_s(&run_info, run_info_name, "w");

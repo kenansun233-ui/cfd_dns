@@ -6,11 +6,9 @@
 #include "cuda_runtime.h"
 #include "cuda.h"
 #include <iostream>
-#include <fstream>   
 #include "device_launch_parameters.h"
-#include <direct.h>
 
-#include "src/info_device.cuh"
+#include "info_device.cuh"
 
 void getdevice()
 {

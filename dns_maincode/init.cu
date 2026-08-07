@@ -6,16 +6,15 @@
 #include "cuda_runtime.h"
 #include "cuda.h"
 #include <iostream>
-#include <fstream>   
 #include "device_launch_parameters.h"
-#include <direct.h>
-#include <io.h>
 
+#include <dirent.h>
 #include <random>
 
-#include "src/parameters.h"
-#include "src/init.cuh"
-#include "src/rhs.cuh"
+#include "parameters.h"
+#include "init.cuh"
+#include "rhs.cuh"
+#include "platform_compat.h"
 
 static FILE* open_file_checked(const char* filename, const char* mode)
 {
@@ -242,7 +241,7 @@ void init_fluid(fluid* flu)
 			}
 
 	FILE* fp = NULL;
-	char filename[100];
+	char filename[512];
 	char flu_name[100];
 
 	sprintf_s(flu_name, "mesh.dat");
@@ -271,7 +270,7 @@ void output_velocity(fluid* flu, fluid* flu_host, int time_step)
 	CHECK_CUDA(cudaMemcpy(flu_host, flu, xyzsize * sizeof(fluid), cudaMemcpyDeviceToHost));
 
 	FILE* fp = NULL;//�ļ�ָ��
-	char filename[200];//�ļ���
+	char filename[512];//�ļ���
 
 	sprintf_s(filename, sizeof(filename), "%sfield_%08d.dat", output_path, time_step);
 	fp = open_file_checked(filename, "w+");
@@ -311,7 +310,7 @@ __global__ void init_gpu_var(fluid* flu, process_variables* var)
 void output_prgrad(double prgradaver)
 {
 	FILE* fp = NULL;//�ļ�ָ��
-	char filename[100];//�ļ���
+	char filename[512];//�ļ���
 	char flu_name[100];
 	sprintf_s(flu_name, "prgrad.dat");
 	sprintf_s(filename, output_path);
@@ -337,7 +336,7 @@ void output_restart(fluid* flu, fluid* flu_host, process_variables* var, int tim
 	CHECK_CUDA(cudaMemcpy(var_for_output, var, xyzsize * sizeof(process_variables), cudaMemcpyDeviceToHost));
 
 	FILE* fp = NULL;//�ļ�ָ��
-	char filename[200];//�ļ���
+	char filename[512];//�ļ���
 
 	sprintf_s(filename, sizeof(filename), "%srestart_%08d.dat", output_path, time_step);
 	fp = open_file_checked(filename, "w+");
@@ -361,23 +360,20 @@ static void find_restart_file(char* filename, size_t filename_size)
 		return;
 	}
 
-	char pattern[200];
-	sprintf_s(pattern, sizeof(pattern), "%srestart_*.dat", output_path);
-
-	struct _finddata_t fileinfo;
-	intptr_t handle = _findfirst(pattern, &fileinfo);
 	int latest_step = -1;
-	char latest_name[100] = "";
+	char latest_name[256] = "";
 
-	if (handle != -1) {
-		do {
+	DIR* dir = opendir(output_path);
+	if (dir != nullptr) {
+		struct dirent* entry = nullptr;
+		while ((entry = readdir(dir)) != nullptr) {
 			int step = -1;
-			if (sscanf_s(fileinfo.name, "restart_%d.dat", &step) == 1 && step > latest_step) {
+			if (sscanf(entry->d_name, "restart_%d.dat", &step) == 1 && step > latest_step) {
 				latest_step = step;
-				sprintf_s(latest_name, sizeof(latest_name), "%s", fileinfo.name);
+				sprintf_s(latest_name, sizeof(latest_name), "%s", entry->d_name);
 			}
-		} while (_findnext(handle, &fileinfo) == 0);
-		_findclose(handle);
+		}
+		closedir(dir);
 	}
 
 	if (latest_step >= 0) {
@@ -392,15 +388,11 @@ static void find_restart_file(char* filename, size_t filename_size)
 
 void init_restart(fluid* flu, fluid* flu_host, process_variables* var)
 {
-	char filename[200];
+	char filename[512];
 	find_restart_file(filename, sizeof(filename));
 	std::cout << "Reading restart file: " << filename
 		<< " (restart_start_step = " << restart_start_step << ")" << std::endl;
-	std::ifstream file(filename);
-	if (!file) {
-		std::cerr << "Unable to open restart file: " << filename << std::endl;
-		exit(EXIT_FAILURE);
-	}
+	FILE* file = open_file_checked(filename, "r");
 
 	int ic, jc, kc;
 	int xyzsize = nxp * (nyp + 1) * nzp;
@@ -410,20 +402,20 @@ void init_restart(fluid* flu, fluid* flu_host, process_variables* var)
 		for (kc = 0; kc < nzp; kc = kc + zskip)
 			for (ic = 0; ic < nxp; ic = ic + xskip)
 			{
-				if (!(file
-					>> flu_host[Ord3(ic, jc, kc, nzp, nxp)].u
-					>> flu_host[Ord3(ic, jc, kc, nzp, nxp)].v
-					>> flu_host[Ord3(ic, jc, kc, nzp, nxp)].w
-					>> flu_host[Ord3(ic, jc, kc, nzp, nxp)].p
-					>> var_for_input[Ord3(ic, jc, kc, nzp, nxp)].uold
-					>> var_for_input[Ord3(ic, jc, kc, nzp, nxp)].vold
-					>> var_for_input[Ord3(ic, jc, kc, nzp, nxp)].wold)
-					)
-				{
-					std::cerr << "Error reading restart data: " << filename << std::endl;
+				const int ret = fscanf(file, "%lf %lf %lf %lf %lf %lf %lf",
+					&flu_host[Ord3(ic, jc, kc, nzp, nxp)].u,
+					&flu_host[Ord3(ic, jc, kc, nzp, nxp)].v,
+					&flu_host[Ord3(ic, jc, kc, nzp, nxp)].w,
+					&flu_host[Ord3(ic, jc, kc, nzp, nxp)].p,
+					&var_for_input[Ord3(ic, jc, kc, nzp, nxp)].uold,
+					&var_for_input[Ord3(ic, jc, kc, nzp, nxp)].vold,
+					&var_for_input[Ord3(ic, jc, kc, nzp, nxp)].wold);
+				if (ret != 7) {
+					fprintf(stderr, "Error reading restart data: %s\n", filename);
 					exit(EXIT_FAILURE);
 				}
 			}
+	fclose(file);
 
 	int iu, ku;
 
@@ -516,7 +508,7 @@ void clcstat(fluid* flu, double current_time, int time_step)
 	int jc;
  
 	FILE* fp = NULL;//�ļ�ָ��
-	char filename[100];//�ļ���
+	char filename[512];//�ļ���
 	char flu_name[100];
 
 	sprintf_s(flu_name, "stat.dat");
