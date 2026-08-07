@@ -23,6 +23,8 @@ cfg.q_percentile = 99.5;       % Fixed threshold is obtained from first field.
 cfg.q_plot_stride = [1, 1, 1]; % x, z, y visualization stride.
 cfg.figure_dpi = 180;
 cfg.overwrite = true;
+cfg.retau_override = NaN;      % Set a value (for example 180) to force it.
+cfg.prgrad_average_count = 1000;
 
 [field_files, case_dir] = find_field_files(case_dir);
 info_path = find_nearest_file(case_dir, 'run_info.dat');
@@ -57,6 +59,12 @@ expected_rows = double(nx) * double(nz) * double(ny);
 
 [x, y, z, mesh_path] = load_grid_coordinates(case_dir, info, ...
     ix, iy, iz, mesh_sx, mesh_sy, mesh_sz, gamma_mesh);
+[wall, wall_source] = reference_wall_units(case_dir, info, cfg);
+x_plus = x * wall.utau / wall.nu;
+y_plus = y * wall.utau / wall.nu;
+z_plus = z * wall.utau / wall.nu;
+fprintf('Reference wall units: u_tau=%.8e, Re_tau=%.4f (%s)\n', ...
+    wall.utau, wall.retau, wall_source);
 physical = find(iy >= 1 & iy <= nyp - 1);
 if numel(physical) < 3
     error('At least three physical y locations are required.');
@@ -149,13 +157,15 @@ for i = 1:nfiles
 
     slice_file = fullfile(output_dir, sprintf('slices_%08d.png', steps(i)));
     if cfg.overwrite || ~exist(slice_file, 'file')
-        plot_snapshot_slices(x, y_phys, z, u, p, omega_mag, physical, ...
-            near_index, ub_history(i), steps(i), times(i), info, slice_file, cfg);
+        plot_snapshot_slices(x_plus, y_plus(physical), z_plus, u, p, ...
+            omega_mag, physical, near_index, ub_history(i), steps(i), ...
+            times(i), info, wall, slice_file, cfg);
     end
 
     q_file = fullfile(output_dir, sprintf('q_%08d.png', steps(i)));
     if cfg.overwrite || ~exist(q_file, 'file')
-        plot_q_structure(x, y_phys, z, u_phys, q_phys, um, q_iso, ...
+        plot_q_structure(x_plus, y_plus(physical), z_plus, u_phys, ...
+            q_phys, um, q_iso, ...
             steps(i), times(i), info, q_file, cfg);
     end
 
@@ -172,8 +182,8 @@ k_profile = 0.5 * (urms .^ 2 + vrms .^ 2 + wrms .^ 2);
 ub_mean = mean(ub_history, 'omitnan');
 
 profile_file = fullfile(output_dir, 'statistics_profiles.png');
-plot_summary_profiles(y_phys, h, mean_um, mean_vm, mean_wm, ...
-    urms, vrms, wrms, k_profile, ub_mean, profile_file, cfg);
+plot_summary_profiles(y_plus(physical), mean_um, mean_vm, mean_wm, ...
+    urms, vrms, wrms, k_profile, ub_mean, wall, profile_file, cfg);
 
 history_file = fullfile(output_dir, 'time_histories.png');
 plot_time_histories(times, steps, ub_history, k_history, qmax_history, ...
@@ -183,9 +193,15 @@ summary = struct();
 summary.case_dir = case_dir;
 summary.run_info_path = info_path;
 summary.mesh_path = mesh_path;
+summary.wall_unit_source = wall_source;
+summary.utau_reference = wall.utau;
+summary.retau_reference = wall.retau;
 summary.steps = steps;
 summary.times = times;
 summary.y = y_phys;
+summary.x_plus = x_plus;
+summary.y_plus = y_plus(physical);
+summary.z_plus = z_plus;
 summary.y_weights = y_weights;
 summary.mean_u = mean_um;
 summary.mean_v = mean_vm;
@@ -366,6 +382,68 @@ end
 end
 
 
+function [wall, source] = reference_wall_units(case_dir, info, cfg)
+nu = require_value(info, 'nu');
+h = require_value(info, 'ylength');
+
+if isfinite(cfg.retau_override) && cfg.retau_override > 0
+    retau = cfg.retau_override;
+    utau = retau * nu / h;
+    source = sprintf('configured Re_tau=%.6g', retau);
+else
+    prgrad_path = find_standard_prgrad(case_dir);
+    if isempty(prgrad_path)
+        wall_on = get_value(info, 'enable_wall_oscillation', 0) ~= 0;
+        if ~wall_on
+            prgrad_path = find_nearest_file(case_dir, 'prgrad.dat');
+        end
+    end
+    if isempty(prgrad_path)
+        error(['A reference friction velocity is required for wall units. ', ...
+            'Place standardFlow/prgrad.dat beside the oscillating cases, ', ...
+            'or set cfg.retau_override near the top of this file.']);
+    end
+
+    prgrad = readmatrix(prgrad_path, 'FileType', 'text');
+    prgrad = prgrad(isfinite(prgrad));
+    if isempty(prgrad)
+        error('No finite pressure-gradient values were found in %s.', prgrad_path);
+    end
+    count = min(cfg.prgrad_average_count, numel(prgrad));
+    mean_prgrad = mean(prgrad(end - count + 1:end));
+    utau = sqrt(abs(mean_prgrad) * h);
+    retau = utau * h / nu;
+    source = sprintf('last %d values of %s', count, prgrad_path);
+end
+
+wall = struct();
+wall.nu = nu;
+wall.utau = utau;
+wall.retau = retau;
+wall.xlength_plus = require_value(info, 'xlength') * utau / nu;
+wall.ylength_plus = h * utau / nu;
+wall.zlength_plus = require_value(info, 'zlength') * utau / nu;
+end
+
+
+function path_out = find_standard_prgrad(start_dir)
+path_out = '';
+current = start_dir;
+for level = 1:4
+    candidate = fullfile(current, 'standardFlow', 'prgrad.dat');
+    if exist(candidate, 'file')
+        path_out = candidate;
+        return;
+    end
+    parent = fileparts(current);
+    if strcmp(parent, current)
+        return;
+    end
+    current = parent;
+end
+end
+
+
 function y = build_half_channel_y(nyp, h, gamma_mesh)
 nyc = nyp - 1;
 xi = (0:nyc) / nyc;
@@ -512,12 +590,12 @@ end
 
 
 function plot_snapshot_slices(x, y, z, u, p, omega_mag, physical, ...
-    near_index, ub, step, time, info, output_file, cfg)
+    near_index, ub, step, time, info, wall, output_file, cfg)
 z_mid = max(1, round(numel(z) / 2));
 u_scale = max(abs(ub), eps);
-lx = get_value(info, 'xlength', x(end));
-h = get_value(info, 'ylength', y(end));
-lz = get_value(info, 'zlength', z(end));
+lx = wall.xlength_plus;
+h = wall.ylength_plus;
+lz = wall.zlength_plus;
 
 u_xy = double(squeeze(u(:, z_mid, physical)))' / u_scale;
 p_xy = double(squeeze(p(:, z_mid, physical)))';
@@ -534,28 +612,28 @@ nexttile(layout);
 imagesc(x, y, u_xy);
 set(gca, 'YDir', 'normal'); axis tight;
 xlim([0, lx]); ylim([0, h]);
-xlabel('x'); ylabel('y'); title('Mid-span u / U_b'); colorbar;
+xlabel('x^+'); ylabel('y^+'); title('Mid-span u / U_b'); colorbar;
 apply_robust_limits(u_xy, false);
 
 nexttile(layout);
 imagesc(x, y, p_xy);
 set(gca, 'YDir', 'normal'); axis tight;
 xlim([0, lx]); ylim([0, h]);
-xlabel('x'); ylabel('y'); title("Mid-span p'"); colorbar;
+xlabel('x^+'); ylabel('y^+'); title("Mid-span p'"); colorbar;
 apply_robust_limits(p_xy, true);
 
 nexttile(layout);
 imagesc(x, z, u_xz');
 set(gca, 'YDir', 'normal'); axis equal tight;
 xlim([0, lx]); ylim([0, lz]);
-xlabel('x'); ylabel('z'); title("Near-wall u' / U_b"); colorbar;
+xlabel('x^+'); ylabel('z^+'); title("Near-wall u' / U_b"); colorbar;
 apply_robust_limits(u_xz, true);
 
 nexttile(layout);
 imagesc(x, z, omega_xz');
 set(gca, 'YDir', 'normal'); axis equal tight;
 xlim([0, lx]); ylim([0, lz]);
-xlabel('x'); ylabel('z'); title('|omega| h / U_b'); colorbar;
+xlabel('x^+'); ylabel('z^+'); title('|omega| h / U_b'); colorbar;
 apply_robust_limits(omega_xz, false);
 
 colormap(fig, parula(256));
@@ -603,7 +681,7 @@ else
         'Units', 'normalized', 'HorizontalAlignment', 'center');
 end
 
-xlabel(ax, 'x'); ylabel(ax, 'z'); zlabel(ax, 'y');
+xlabel(ax, 'x^+'); ylabel(ax, 'z^+'); zlabel(ax, 'y^+');
 title(ax, sprintf('%s, Q_{iso}=%.4e, color=u''', ...
     snapshot_title(step, time, info), q_iso));
 axis(ax, 'tight'); axis(ax, 'vis3d');
@@ -616,38 +694,38 @@ close(fig);
 end
 
 
-function plot_summary_profiles(y, h, um, vm, wm, urms, vrms, wrms, ...
-    k, ub, output_file, cfg)
-scale = max(abs(ub), eps);
-eta = y / h;
+function plot_summary_profiles(y_plus, um, vm, wm, urms, vrms, wrms, ...
+    k, ub, wall, output_file, cfg)
+scale = wall.utau;
 fig = figure('Visible', 'off', 'Color', 'w', 'Position', [50, 50, 1400, 850]);
 layout = tiledlayout(fig, 2, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
 
 nexttile(layout);
-plot(um / scale, eta, 'LineWidth', 1.8); hold on;
-plot(vm / scale, eta, '--', 'LineWidth', 1.3);
-plot(wm / scale, eta, ':', 'LineWidth', 1.5);
-xlabel('Mean velocity / U_b'); ylabel('y / h');
+plot(y_plus, um / scale, 'LineWidth', 1.8); hold on;
+plot(y_plus, vm / scale, '--', 'LineWidth', 1.3);
+plot(y_plus, wm / scale, ':', 'LineWidth', 1.5);
+xlabel('y^+'); ylabel('Mean velocity^+'); set(gca, 'XScale', 'log');
 legend('U', 'V', 'W', 'Location', 'best'); grid on;
 
 nexttile(layout);
-plot(urms / scale, eta, 'LineWidth', 1.8); hold on;
-plot(vrms / scale, eta, 'LineWidth', 1.8);
-plot(wrms / scale, eta, 'LineWidth', 1.8);
-xlabel('RMS / U_b'); ylabel('y / h');
+plot(y_plus, urms / scale, 'LineWidth', 1.8); hold on;
+plot(y_plus, vrms / scale, 'LineWidth', 1.8);
+plot(y_plus, wrms / scale, 'LineWidth', 1.8);
+xlabel('y^+'); ylabel('RMS^+'); set(gca, 'XScale', 'log');
 legend('u_{rms}', 'v_{rms}', 'w_{rms}', 'Location', 'best'); grid on;
 
 nexttile(layout);
-plot(k / scale ^ 2, eta, 'LineWidth', 1.8);
-xlabel('k / U_b^2'); ylabel('y / h'); grid on;
+plot(y_plus, k / scale ^ 2, 'LineWidth', 1.8);
+xlabel('y^+'); ylabel('k^+'); set(gca, 'XScale', 'log'); grid on;
 
 nexttile(layout);
-plot(urms / scale, eta, 'LineWidth', 1.8); hold on;
-plot(sqrt(2 * k) / scale, eta, '--', 'LineWidth', 1.8);
-xlabel('Turbulence intensity'); ylabel('y / h');
-legend('u_{rms}/U_b', 'sqrt(2k)/U_b', 'Location', 'best'); grid on;
+plot(y_plus, urms / scale, 'LineWidth', 1.8); hold on;
+plot(y_plus, sqrt(2 * k) / scale, '--', 'LineWidth', 1.8);
+xlabel('y^+'); ylabel('Turbulence intensity^+'); set(gca, 'XScale', 'log');
+legend('u_{rms}^+', 'sqrt(2k)^+', 'Location', 'best'); grid on;
 
-sgtitle(layout, sprintf('Statistics from all fields, mean U_b = %.6e', ub));
+sgtitle(layout, sprintf(['Statistics from all fields, mean U_b=%.6e, ', ...
+    'reference Re_tau=%.2f'], ub, wall.retau));
 save_figure(fig, output_file, cfg.figure_dpi);
 close(fig);
 end
